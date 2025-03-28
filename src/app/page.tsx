@@ -16,7 +16,7 @@ export default function Home() {
         
         {/* Action button */}
         <Link 
-          href="/split"
+          href="/upload"
           className="px-10 py-3.5 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white rounded-xl transition-all duration-300 font-semibold tracking-wide shadow-lg hover:shadow-blue-500/25 transform hover:scale-105 active:scale-95"
         >
           Start
