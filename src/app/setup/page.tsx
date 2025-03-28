@@ -46,8 +46,8 @@ export default function Setup() {
   };
 
   return (
-    <div className="min-h-screen bg-white flex flex-col items-center justify-center p-6">
-      <div className="w-full max-w-md mx-auto flex flex-col items-center justify-center space-y-12">
+    <div className="min-h-screen bg-white flex flex-col items-center p-6">
+      <div className="w-full max-w-md mx-auto flex flex-col items-center space-y-8">
         {/* Page Title */}
         <h1 className="text-5xl font-bold tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-blue-600 to-purple-600">
           Setup Bill
@@ -71,7 +71,7 @@ export default function Setup() {
                   name="subtotal"
                   value={formData.subtotal}
                   onChange={handleInputChange}
-                  className="w-full pl-8 pr-4 py-3 rounded-xl border border-gray-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all outline-none"
+                  className="w-full pl-8 pr-4 py-3 rounded-xl border border-gray-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all outline-none text-gray-900"
                   placeholder="0.00"
                   step="0.01"
                   min="0"
@@ -91,7 +91,7 @@ export default function Setup() {
                   name="tax"
                   value={formData.tax}
                   onChange={handleInputChange}
-                  className="w-full pl-8 pr-4 py-3 rounded-xl border border-gray-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all outline-none"
+                  className="w-full pl-8 pr-4 py-3 rounded-xl border border-gray-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all outline-none text-gray-900"
                   placeholder="0.00"
                   step="0.01"
                   min="0"
