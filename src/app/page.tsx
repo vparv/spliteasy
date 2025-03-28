@@ -1,42 +1,26 @@
 import Link from 'next/link';
-import Image from 'next/image';
 
 export default function Home() {
   return (
-    <div className="min-h-screen relative flex flex-col items-center justify-center overflow-hidden">
-      {/* Background image */}
-      <div className="absolute inset-0 z-0">
-        <Image
-          src="/images/background-app.png"
-          alt="Restaurant background"
-          fill
-          priority
-          className="object-cover object-center"
-        />
-        {/* Overlay for better text readability */}
-        <div className="absolute inset-0 bg-black/30 dark:bg-black/50"></div>
-      </div>
-      
-      <div className="relative z-30 w-full max-w-screen-xl mx-auto px-6 py-12 md:py-24 flex flex-col items-center justify-center">
-        {/* Main heading and subheading */}
-        <div className="text-center mb-12 backdrop-blur-sm bg-white/30 dark:bg-black/30 p-8 rounded-2xl">
-          <h1 className="text-4xl md:text-5xl lg:text-6xl font-normal text-amber-950 dark:text-amber-50 mb-6">
-            Split your <br />
-            restaurant bill <br />
-            at the table
-          </h1>
-      
-        </div>
+    <div className="min-h-screen bg-gradient-to-br from-white to-blue-50 dark:from-gray-950 dark:to-blue-950 flex flex-col items-center justify-center p-6">
+      <div className="w-full max-w-md mx-auto px-8 py-12 flex flex-col items-center justify-center text-center space-y-12 bg-white/80 dark:bg-gray-900/80 backdrop-blur-sm rounded-2xl shadow-xl">
+        {/* App name */}
+        <h1 className="text-6xl font-extrabold tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-blue-600 to-purple-600 dark:from-blue-400 dark:to-purple-400 animate-fade-in font-sans">
+          Splitsy
+        </h1>
+        
+        {/* Tagline */}
+        <p className="text-xl font-medium tracking-wide text-gray-700 dark:text-gray-200">
+          Split the bill at the table
+        </p>
         
         {/* Action button */}
-        <div className="mb-16">
-          <Link 
-            href="/split"
-            className="px-8 py-3 bg-amber-800 hover:bg-amber-700 text-white rounded-full transition-colors duration-200 text-sm font-medium shadow-lg"
-          >
-            Start
-          </Link>
-        </div>
+        <Link 
+          href="/split"
+          className="px-10 py-3.5 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white rounded-xl transition-all duration-300 font-semibold tracking-wide shadow-lg hover:shadow-blue-500/25 transform hover:scale-105 active:scale-95"
+        >
+          Start
+        </Link>
       </div>
     </div>
   );
