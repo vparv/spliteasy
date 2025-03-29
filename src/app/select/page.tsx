@@ -1,215 +1,389 @@
 'use client';
 
 import Link from 'next/link';
-import { useState } from 'react';
+import { useState, useEffect, Suspense } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { supabase } from '@/lib/supabase';
+
+interface BillItem {
+  id: string;
+  name: string;
+  price: number;
+  category: string;
+}
+
+interface Participant {
+  id: string;
+  name: string;
+  is_owner: boolean;
+}
+
+interface ItemSelection {
+  itemId: string;
+  participantId: string;
+  percentage: number;
+}
+
+interface SessionData {
+  restaurant_name: string;
+  total_amount: number;
+  number_of_participants: number;
+}
 
 // Mock data for bill items
-const mockBillItems = [
-  { id: 1, name: 'Chicken Pasta', price: 16.99, category: 'Mains' },
-  { id: 2, name: 'Caesar Salad', price: 12.99, category: 'Starters' },
-  { id: 3, name: 'Garlic Bread', price: 5.99, category: 'Sides' },
-  { id: 4, name: 'Margherita Pizza', price: 18.99, category: 'Mains' },
-  { id: 5, name: 'Tiramisu', price: 8.99, category: 'Desserts' },
-  { id: 6, name: 'Soft Drinks', price: 3.99, category: 'Beverages' },
-  { id: 7, name: 'French Fries', price: 4.99, category: 'Sides' },
-  { id: 8, name: 'Chocolate Cake', price: 7.99, category: 'Desserts' },
+const mockBillItems: BillItem[] = [
+  { id: '1', name: 'Chicken Pasta', price: 16.99, category: 'Mains' },
+  { id: '2', name: 'Caesar Salad', price: 12.99, category: 'Starters' },
+  { id: '3', name: 'Garlic Bread', price: 5.99, category: 'Sides' },
+  { id: '4', name: 'Margherita Pizza', price: 18.99, category: 'Mains' },
+  { id: '5', name: 'Tiramisu', price: 8.99, category: 'Desserts' },
+  { id: '6', name: 'Soft Drinks', price: 3.99, category: 'Beverages' },
+  { id: '7', name: 'French Fries', price: 4.99, category: 'Sides' },
+  { id: '8', name: 'Chocolate Cake', price: 7.99, category: 'Desserts' },
 ];
-
-// Mock data for people
-const mockPeople = [
-  { id: 1, name: 'You' },
-  { id: 2, name: 'Person 2' },
-  { id: 3, name: 'Person 3' },
-  { id: 4, name: 'Person 4' },
-];
-
-type ItemSelection = {
-  itemId: number;
-  personId: number;
-  percentage: number;
-};
 
 export default function Select() {
+  return (
+    <Suspense fallback={<div>Loading...</div>}>
+      <SelectContent />
+    </Suspense>
+  );
+}
+
+function SelectContent() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const sessionId = searchParams.get('session');
+  const participantId = searchParams.get('participant');
+
+  const [sessionData, setSessionData] = useState<SessionData | null>(null);
+  const [items, setItems] = useState<BillItem[]>([]);
+  const [participants, setParticipants] = useState<Participant[]>([]);
   const [selections, setSelections] = useState<ItemSelection[]>([]);
-  const [expandedItem, setExpandedItem] = useState<number | null>(null);
+  const [currentParticipant, setCurrentParticipant] = useState<Participant | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [isReviewing, setIsReviewing] = useState(false);
 
-  const toggleItemExpansion = (itemId: number) => {
-    setExpandedItem(expandedItem === itemId ? null : itemId);
-  };
+  // Fetch session data, items, and participants
+  useEffect(() => {
+    if (!sessionId || !participantId) {
+      router.push('/');
+      return;
+    }
 
-  // Utility function to calculate total percentage allocated for an item
-  // Kept for future validation implementation to ensure total split equals 100%
-  const getItemTotal = (itemId: number) => {
-    const itemSelections = selections.filter(s => s.itemId === itemId);
-    return itemSelections.reduce((sum, s) => sum + s.percentage, 0);
-  };
+    async function fetchData() {
+      try {
+        setIsLoading(true);
+        setError(null);
 
-  const togglePersonSelection = (itemId: number, personId: number) => {
-    const existingSelection = selections.find(
-      s => s.itemId === itemId && s.personId === personId
-    );
+        // Fetch session details
+        const { data: sessionData, error: sessionError } = await supabase
+          .from('bill_sessions')
+          .select('restaurant_name, total_amount, number_of_participants')
+          .eq('id', sessionId)
+          .single();
 
-    if (existingSelection) {
-      // Remove the person's selection
-      const newSelections = selections.filter(s => !(s.itemId === itemId && s.personId === personId));
-      
-      // Recalculate percentages for remaining people on this item
-      const itemSelections = newSelections.filter(s => s.itemId === itemId);
-      const numPeople = itemSelections.length;
-      
-      if (numPeople > 0) {
-        const evenSplit = 100 / numPeople;
-        const updatedSelections = newSelections.map(s => 
-          s.itemId === itemId ? { ...s, percentage: evenSplit } : s
+        if (sessionError) throw sessionError;
+        if (!sessionData) throw new Error('Session not found');
+
+        setSessionData(sessionData);
+        setItems(mockBillItems);
+
+        // Fetch participants
+        const { data: participantsData, error: participantsError } = await supabase
+          .from('bill_participants')
+          .select('*')
+          .eq('session_id', sessionId);
+
+        if (participantsError) throw participantsError;
+        setParticipants(participantsData || []);
+
+        // Set current participant
+        const currentParticipant = participantsData?.find(p => p.id === participantId);
+        if (!currentParticipant) throw new Error('Participant not found');
+        setCurrentParticipant(currentParticipant);
+
+        // Fetch existing selections
+        const { data: selectionsData, error: selectionsError } = await supabase
+          .from('item_selections')
+          .select('*')
+          .eq('session_id', sessionId);
+
+        if (selectionsError) throw selectionsError;
+        
+        setSelections(
+          selectionsData?.map(s => ({
+            itemId: s.item_id,
+            participantId: s.participant_id,
+            percentage: s.percentage
+          })) || []
         );
-        setSelections(updatedSelections);
-      } else {
-        setSelections(newSelections);
+
+      } catch (error) {
+        console.error('Error fetching data:', error);
+        setError('Failed to load bill details. Please try again.');
+      } finally {
+        setIsLoading(false);
       }
-    } else {
-      // Add new selection
-      const itemSelections = selections.filter(s => s.itemId === itemId);
-      const numPeople = itemSelections.length + 1; // Including the new person
-      const evenSplit = 100 / numPeople;
+    }
 
-      // Update all selections for this item with the new even split
-      const updatedSelections = selections
-        .filter(s => s.itemId !== itemId) // Remove all selections for this item
-        .concat(
-          itemSelections.map(s => ({ ...s, percentage: evenSplit })) // Add back existing selections with new percentage
-        )
-        .concat([{ itemId, personId, percentage: evenSplit }]); // Add the new selection
+    fetchData();
+  }, [sessionId, participantId, router]);
 
-      setSelections(updatedSelections);
+  const handleItemSelect = (itemId: string) => {
+    if (!currentParticipant) return;
+
+    setSelections(prev => {
+      const existingSelection = prev.find(
+        s => s.itemId === itemId && s.participantId === currentParticipant.id
+      );
+
+      if (existingSelection) {
+        return prev.filter(s => !(s.itemId === itemId && s.participantId === currentParticipant.id));
+      } else {
+        return [...prev, { itemId, participantId: currentParticipant.id, percentage: 100 }];
+      }
+    });
+  };
+
+  const handleContinue = async () => {
+    if (!sessionId || !currentParticipant) return;
+
+    if (!isReviewing) {
+      setIsReviewing(true);
+      return;
+    }
+
+    try {
+      setIsSaving(true);
+      setError(null);
+
+      console.log('Saving selections:', selections);
+
+      // Only get selections for the current participant
+      const currentParticipantSelections = selections.filter(s => s.participantId === currentParticipant.id);
+
+      // Delete existing selections for this participant only
+      const { error: deleteError } = await supabase
+        .from('item_selections')
+        .delete()
+        .eq('session_id', sessionId)
+        .eq('participant_id', currentParticipant.id);
+
+      if (deleteError) {
+        console.error('Error deleting existing selections:', deleteError);
+        throw deleteError;
+      }
+
+      // Only insert selections for the current participant
+      if (currentParticipantSelections.length > 0) {
+        const { data: insertData, error: insertError } = await supabase
+          .from('item_selections')
+          .insert(
+            currentParticipantSelections.map(s => ({
+              session_id: sessionId,
+              item_id: s.itemId,
+              participant_id: currentParticipant.id,
+              percentage: s.percentage
+            }))
+          )
+          .select();
+
+        if (insertError) {
+          console.error('Error inserting selections:', insertError);
+          throw insertError;
+        }
+
+        console.log('Inserted selections:', insertData);
+      }
+
+      // Navigate to waiting page
+      router.push(`/waiting?session=${sessionId}&participant=${currentParticipant.id}`);
+    } catch (error) {
+      console.error('Error saving selections:', error);
+      if (error instanceof Error) {
+        setError(`Failed to save selections: ${error.message}`);
+      } else if (typeof error === 'object' && error !== null) {
+        setError(`Failed to save selections: ${JSON.stringify(error)}`);
+      } else {
+        setError('Failed to save selections. Please try again.');
+      }
+    } finally {
+      setIsSaving(false);
     }
   };
 
-  const getPersonShare = (itemId: number, personId: number) => {
-    const selection = selections.find(s => s.itemId === itemId && s.personId === personId);
-    return selection?.percentage || 0;
-  };
+  if (isLoading || !sessionData || !currentParticipant) {
+    return (
+      <div className="min-h-screen bg-white flex items-center justify-center">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500" />
+      </div>
+    );
+  }
 
-  const calculatePersonTotal = (personId: number) => {
-    return selections
-      .filter(s => s.personId === personId)
-      .reduce((total, selection) => {
-        const item = mockBillItems.find(item => item.id === selection.itemId);
-        if (item) {
-          return total + (item.price * selection.percentage) / 100;
-        }
-        return total;
-      }, 0);
-  };
+  // Get selected and unselected items
+  const selectedItems = items.filter(item =>
+    selections.some(s => s.itemId === item.id && s.participantId === currentParticipant.id)
+  );
+  const unselectedItems = items.filter(item =>
+    !selections.some(s => s.itemId === item.id && s.participantId === currentParticipant.id)
+  );
 
   return (
     <div className="min-h-screen bg-white flex flex-col items-center p-6">
       <div className="w-full max-w-md mx-auto flex flex-col items-center space-y-8">
         {/* Page Title */}
         <h1 className="text-5xl font-bold tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-blue-600 to-purple-600">
-          Select Items
+          {isReviewing ? 'Review Your Items' : 'Select Your Items'}
         </h1>
 
-        {/* Instructions */}
+        {/* Session Info */}
         <div className="w-full bg-blue-50 p-4 rounded-xl space-y-2">
-          <p className="text-sm text-gray-600">
-            Tap on an item to select who had it. You can split items between multiple people.
-          </p>
-        </div>
-
-        {/* Bill Items */}
-        <div className="w-full space-y-4">
-          {mockBillItems.map((item) => (
-            <div key={item.id} className="w-full">
-              <button
-                onClick={() => toggleItemExpansion(item.id)}
-                className="w-full flex items-center justify-between p-4 bg-white border border-gray-200 rounded-xl hover:border-blue-300 transition-all"
-              >
-                <div className="flex flex-col items-start">
-                  <span className="font-medium text-gray-900">{item.name}</span>
-                  <span className="text-sm text-gray-500">{item.category}</span>
-                </div>
-                <div className="flex items-center space-x-3">
-                  <span className="font-medium text-gray-900">
-                    ${item.price.toFixed(2)}
-                  </span>
-                  <svg
-                    className={`w-5 h-5 text-gray-400 transition-transform ${
-                      expandedItem === item.id ? 'rotate-180' : ''
-                    }`}
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M19 9l-7 7-7-7"
-                    />
-                  </svg>
-                </div>
-              </button>
-
-              {/* Selection Panel */}
-              {expandedItem === item.id && (
-                <div className="mt-2 p-4 bg-gray-50 rounded-xl space-y-4">
-                  <div className="flex flex-wrap gap-2">
-                    {mockPeople.map((person) => (
-                      <button
-                        key={person.id}
-                        onClick={() => togglePersonSelection(item.id, person.id)}
-                        className={`px-3 py-2 rounded-lg text-sm font-medium transition-all
-                          ${getPersonShare(item.id, person.id) > 0
-                            ? 'bg-blue-500 text-white'
-                            : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                          }`}
-                      >
-                        {person.name}
-                        {getPersonShare(item.id, person.id) > 0 && 
-                          ` (${getPersonShare(item.id, person.id).toFixed(2)}%)`
-                        }
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
+          <div className="text-lg font-medium text-gray-900">
+            {sessionData.restaurant_name}
+          </div>
+          <div className="flex justify-between items-center">
+            <span className="text-sm text-gray-600">Total Amount:</span>
+            <span className="text-xl font-bold text-blue-600">
+              ${sessionData.total_amount.toFixed(2)}
+            </span>
+          </div>
+          {!isReviewing && (
+            <div className="text-sm text-gray-600 mt-2">
+              <span>Selecting items as: <span className="font-medium text-blue-600">{currentParticipant.name}</span></span>
             </div>
-          ))}
+          )}
         </div>
 
-        {/* Summary */}
-        <div className="w-full bg-blue-50 p-4 rounded-xl space-y-3">
-          <h3 className="font-medium text-gray-900">Current Split</h3>
-          {mockPeople.map((person) => {
-            const total = calculatePersonTotal(person.id);
-            if (total > 0) {
-              return (
-                <div key={person.id} className="flex justify-between items-center">
-                  <span className="text-gray-600">{person.name}</span>
-                  <span className="font-medium text-blue-600">
-                    ${total.toFixed(2)}
-                  </span>
+        {/* Items List */}
+        {isReviewing ? (
+          <div className="w-full space-y-6">
+            {/* Selected Items Section */}
+            <div className="space-y-4">
+              <h2 className="text-lg font-medium text-gray-900">I had these items:</h2>
+              <div className="space-y-3">
+                {selectedItems.map((item) => (
+                  <button
+                    key={item.id}
+                    className="w-full text-left bg-blue-500 text-white border-blue-600 p-4 rounded-xl border cursor-default"
+                  >
+                    <div className="flex justify-between items-center">
+                      <div>
+                        <h3 className="font-medium text-inherit">
+                          {item.name}
+                        </h3>
+                        <p className="text-sm text-blue-100">
+                          {item.category}
+                        </p>
+                      </div>
+                      <span className="font-medium text-inherit">
+                        ${item.price.toFixed(2)}
+                      </span>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Unselected Items Section */}
+            {unselectedItems.length > 0 && (
+              <div className="space-y-4">
+                <h2 className="text-lg font-medium text-gray-900">I did not have these items:</h2>
+                <div className="space-y-3">
+                  {unselectedItems.map((item) => (
+                    <button
+                      key={item.id}
+                      className="w-full text-left bg-gray-50 text-gray-500 border-gray-200 p-4 rounded-xl border cursor-default"
+                    >
+                      <div className="flex justify-between items-center">
+                        <div>
+                          <h3 className="font-medium text-inherit">
+                            {item.name}
+                          </h3>
+                          <p className="text-sm text-gray-400">
+                            {item.category}
+                          </p>
+                        </div>
+                        <span className="font-medium text-inherit">
+                          ${item.price.toFixed(2)}
+                        </span>
+                      </div>
+                    </button>
+                  ))}
                 </div>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="w-full space-y-4">
+            {items.map((item) => {
+              const isSelected = selections.some(
+                s => s.itemId === item.id && s.participantId === currentParticipant.id
               );
-            }
-            return null;
-          })}
-        </div>
+
+              return (
+                <button
+                  key={item.id}
+                  onClick={() => handleItemSelect(item.id)}
+                  className={`w-full text-left transition-all duration-200
+                    ${isSelected
+                      ? 'bg-blue-500 text-white border-blue-600'
+                      : 'bg-white text-gray-900 border-gray-200 hover:border-blue-300'
+                    } p-4 rounded-xl border cursor-pointer`}
+                >
+                  <div className="flex justify-between items-center">
+                    <div>
+                      <h3 className="font-medium text-inherit">
+                        {item.name}
+                      </h3>
+                      <p className={`text-sm ${isSelected ? 'text-blue-100' : 'text-gray-500'}`}>
+                        {item.category}
+                      </p>
+                    </div>
+                    <span className="font-medium text-inherit">
+                      ${item.price.toFixed(2)}
+                    </span>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        {error && (
+          <div className="text-red-500 text-sm text-center">
+            {error}
+          </div>
+        )}
 
         {/* Navigation */}
         <div className="flex w-full space-x-4">
-          <Link 
-            href="/split"
+          <button 
+            onClick={() => isReviewing ? setIsReviewing(false) : router.push(`/split?session=${sessionId}`)}
             className="w-1/2 py-4 px-6 border-2 border-blue-600 text-blue-600 rounded-2xl transition-all duration-300 font-medium text-center text-lg hover:bg-blue-50"
           >
-            Back
-          </Link>
-          <Link 
-            href="/summary"
-            className="w-1/2 py-4 px-6 bg-blue-500 text-white rounded-2xl transition-all duration-300 font-medium text-lg text-center hover:bg-blue-600"
+            {isReviewing ? 'Edit Selections' : 'Back'}
+          </button>
+          <button
+            onClick={handleContinue}
+            disabled={isSaving || selections.length === 0}
+            className={`w-1/2 py-4 px-6 bg-blue-500 text-white rounded-2xl transition-all duration-300 font-medium text-lg text-center hover:bg-blue-600 relative
+              ${(isSaving || selections.length === 0) && 'opacity-50 cursor-not-allowed'}`}
           >
-            Continue
-          </Link>
+            {isSaving ? (
+              <div className="flex items-center justify-center">
+                <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                Saving...
+              </div>
+            ) : (
+              isReviewing ? 'Confirm & Continue' : 'Continue'
+            )}
+          </button>
         </div>
       </div>
     </div>

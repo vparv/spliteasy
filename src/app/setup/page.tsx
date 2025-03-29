@@ -1,16 +1,39 @@
 'use client';
 
 import Link from 'next/link';
-import { useState } from 'react';
+import { useState, useEffect, Suspense } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { supabase } from '@/lib/supabase';
 
 export default function Setup() {
+  return (
+    <Suspense fallback={<div>Loading...</div>}>
+      <SetupContent />
+    </Suspense>
+  );
+}
+
+function SetupContent() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const sessionId = searchParams.get('session');
+  const [isUpdating, setIsUpdating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
   const [formData, setFormData] = useState({
     restaurantName: '',
-    date: '',
+    date: new Date().toISOString().split('T')[0], // Today's date as default
     subtotal: '',
     tax: '',
     tipPercentage: 18,
   });
+
+  // Redirect if no session ID
+  useEffect(() => {
+    if (!sessionId) {
+      router.push('/upload');
+    }
+  }, [sessionId, router]);
 
   const tipPercentages = [
     { value: 15, label: '15%' },
@@ -40,10 +63,54 @@ export default function Setup() {
     setFormData(prev => ({ ...prev, tipPercentage: percentage }));
   };
 
+  const handleContinue = async () => {
+    if (!sessionId) return;
+    
+    try {
+      setIsUpdating(true);
+      setError(null);
+
+      const subtotal = parseFloat(formData.subtotal);
+      const tax = parseFloat(formData.tax);
+      const tip = parseFloat(calculateTip());
+      const total = parseFloat(calculateTotal());
+
+      // Update session with bill details
+      const { error: updateError } = await supabase
+        .from('bill_sessions')
+        .update({
+          restaurant_name: formData.restaurantName,
+          date: formData.date,
+          subtotal: subtotal,
+          tax_amount: tax,
+          tip_amount: tip,
+          total_amount: total,
+          tip_percentage: formData.tipPercentage,
+          status: 'setup_completed'
+        })
+        .eq('id', sessionId);
+
+      if (updateError) throw updateError;
+
+      // Navigate to split page with session ID
+      router.push(`/split?session=${sessionId}`);
+    } catch (error) {
+      console.error('Error updating session:', error);
+      setError('Failed to save bill details. Please try again.');
+    } finally {
+      setIsUpdating(false);
+    }
+  };
+
   const isFormValid = () => {
-    return parseFloat(formData.subtotal) > 0 && 
+    return formData.restaurantName.trim() !== '' && 
+           parseFloat(formData.subtotal) > 0 && 
            parseFloat(formData.tax) >= 0;
   };
+
+  if (!sessionId) {
+    return null; // Don't render anything while redirecting
+  }
 
   return (
     <div className="min-h-screen bg-white flex flex-col items-center p-6">
@@ -55,6 +122,37 @@ export default function Setup() {
         
         {/* Form Fields */}
         <div className="w-full space-y-6">
+          {/* Restaurant Details */}
+          <div className="space-y-4">
+            <h2 className="text-lg font-semibold text-gray-800">Restaurant Details</h2>
+            <div className="space-y-2">
+              <label htmlFor="restaurantName" className="block text-sm font-medium text-gray-700">
+                Restaurant Name
+              </label>
+              <input
+                type="text"
+                id="restaurantName"
+                name="restaurantName"
+                value={formData.restaurantName}
+                onChange={handleInputChange}
+                className="w-full px-4 py-3 rounded-xl border border-gray-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all outline-none"
+                placeholder="Enter restaurant name"
+              />
+            </div>
+            <div className="space-y-2">
+              <label htmlFor="date" className="block text-sm font-medium text-gray-700">
+                Date
+              </label>
+              <input
+                type="date"
+                id="date"
+                name="date"
+                value={formData.date}
+                onChange={handleInputChange}
+                className="w-full px-4 py-3 rounded-xl border border-gray-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all outline-none"
+              />
+            </div>
+          </div>
 
           {/* Bill Details */}
           <div className="space-y-4">
@@ -108,19 +206,18 @@ export default function Setup() {
                   <button
                     key={value}
                     onClick={() => handleTipSelect(value)}
-                    className={`py-2 px-3 rounded-xl text-sm font-medium transition-all
+                    className={`py-2 px-4 rounded-lg border-2 transition-all
                       ${formData.tipPercentage === value
-                        ? 'bg-blue-500 text-white'
-                        : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                        ? 'border-blue-500 bg-blue-50 text-blue-700'
+                        : 'border-gray-200 hover:border-gray-300 text-gray-600'
                       }`}
                   >
                     {label}
                   </button>
                 ))}
               </div>
-              <div className="bg-blue-50/50 p-3 rounded-xl flex justify-between items-center">
-                <span className="text-sm text-gray-600">Calculated Tip:</span>
-                <span className="text-lg font-semibold text-blue-600">${calculateTip()}</span>
+              <div className="mt-2 text-sm text-gray-500">
+                Tip amount: ${calculateTip()}
               </div>
             </div>
 
@@ -128,6 +225,12 @@ export default function Setup() {
               <p className="text-sm font-medium text-gray-700">Total Amount</p>
               <p className="text-2xl font-bold text-blue-600">${calculateTotal()}</p>
             </div>
+
+            {error && (
+              <div className="text-red-500 text-sm text-center">
+                {error}
+              </div>
+            )}
           </div>
         </div>
 
@@ -139,12 +242,24 @@ export default function Setup() {
           >
             Back
           </Link>
-          <Link 
-            href="/split"
-            className={`w-1/2 py-4 px-6 bg-blue-500 text-white rounded-2xl transition-all duration-300 font-medium text-lg text-center hover:bg-blue-600 ${!isFormValid() && 'opacity-50 pointer-events-none'}`}
+          <button
+            onClick={handleContinue}
+            disabled={!isFormValid() || isUpdating}
+            className={`w-1/2 py-4 px-6 bg-blue-500 text-white rounded-2xl transition-all duration-300 font-medium text-lg text-center hover:bg-blue-600 relative
+              ${(!isFormValid() || isUpdating) && 'opacity-50 cursor-not-allowed'}`}
           >
-            Continue
-          </Link>
+            {isUpdating ? (
+              <div className="flex items-center justify-center">
+                <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                Saving...
+              </div>
+            ) : (
+              'Continue'
+            )}
+          </button>
         </div>
       </div>
     </div>
