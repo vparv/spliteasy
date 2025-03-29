@@ -3,10 +3,15 @@
 import Link from 'next/link';
 import { useRef, useState } from 'react';
 import Image from 'next/image';
+import { supabase } from '@/lib/supabase';
+import { useRouter } from 'next/navigation';
 
 export default function Upload() {
   const [preview, setPreview] = useState<string | null>(null);
+  const [isCreatingSession, setIsCreatingSession] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const router = useRouter();
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -23,6 +28,36 @@ export default function Upload() {
     if (fileInputRef.current) {
       fileInputRef.current.accept = "image/*";
       fileInputRef.current.click();
+    }
+  };
+
+  const handleContinue = async () => {
+    if (!preview) return;
+    
+    try {
+      setIsCreatingSession(true);
+      setError(null);
+
+      // Create a new session
+      const { data: session, error: sessionError } = await supabase
+        .from('bill_sessions')
+        .insert([
+          {
+            status: 'pending'
+          }
+        ])
+        .select()
+        .single();
+
+      if (sessionError) throw sessionError;
+
+      // Navigate to setup page with session ID
+      router.push(`/setup?session=${session.id}`);
+    } catch (error) {
+      console.error('Error creating session:', error);
+      setError('Failed to create session. Please try again.');
+    } finally {
+      setIsCreatingSession(false);
     }
   };
 
@@ -45,7 +80,10 @@ export default function Upload() {
                 className="object-cover"
               />
               <button
-                onClick={() => setPreview(null)}
+                onClick={() => {
+                  setPreview(null);
+                  setError(null);
+                }}
                 className="absolute top-4 right-4 bg-black/50 text-white p-2 rounded-full hover:bg-black/70"
               >
                 <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -72,6 +110,12 @@ export default function Upload() {
             className="hidden"
             accept="image/*"
           />
+
+          {error && (
+            <div className="mt-4 text-red-500 text-sm text-center">
+              {error}
+            </div>
+          )}
         </div>
 
         {/* Navigation */}
@@ -82,12 +126,24 @@ export default function Upload() {
           >
             Back
           </Link>
-          <Link 
-            href="/setup"
-            className={`w-1/2 py-4 px-6 bg-blue-500 text-white rounded-2xl transition-all duration-300 font-medium text-lg text-center hover:bg-blue-600 ${!preview && 'opacity-50 pointer-events-none'}`}
+          <button 
+            onClick={handleContinue}
+            disabled={!preview || isCreatingSession}
+            className={`w-1/2 py-4 px-6 bg-blue-500 text-white rounded-2xl transition-all duration-300 font-medium text-lg text-center hover:bg-blue-600 relative
+              ${(!preview || isCreatingSession) && 'opacity-50 cursor-not-allowed'}`}
           >
-            Continue
-          </Link>
+            {isCreatingSession ? (
+              <div className="flex items-center justify-center">
+                <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                Creating...
+              </div>
+            ) : (
+              'Continue'
+            )}
+          </button>
         </div>
       </div>
     </div>
