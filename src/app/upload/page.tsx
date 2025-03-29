@@ -43,7 +43,7 @@ export default function Upload() {
         .from('bill_sessions')
         .insert([
           {
-            status: 'pending'
+            status: 'created'
           }
         ])
         .select()

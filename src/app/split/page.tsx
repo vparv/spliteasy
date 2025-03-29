@@ -17,6 +17,7 @@ export default function Split() {
   const [isUpdating, setIsUpdating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sessionData, setSessionData] = useState<SessionData | null>(null);
+  const [showShareSuccess, setShowShareSuccess] = useState(false);
 
   const [splitData, setSplitData] = useState({
     splitType: 'equal' as 'equal' | 'custom',
@@ -58,29 +59,88 @@ export default function Split() {
       setIsUpdating(true);
       setError(null);
 
+      console.log('Updating session with:', {
+        split_type: splitData.splitType,
+        number_of_participants: splitData.numberOfPeople,
+        status: 'setup_completed'
+      });
+
       // Update session with split details
-      const { error: updateError } = await supabase
+      const { data: updateData, error: updateError } = await supabase
         .from('bill_sessions')
         .update({
           split_type: splitData.splitType,
           number_of_participants: splitData.numberOfPeople,
-          status: 'split'
+          status: 'setup_completed'
         })
-        .eq('id', sessionId);
+        .eq('id', sessionId)
+        .select();
 
-      if (updateError) throw updateError;
-
-      // Navigate based on split type
-      if (splitData.splitType === 'equal') {
-        router.push(`/summary?session=${sessionId}`);
-      } else {
-        router.push(`/select?session=${sessionId}`);
+      if (updateError) {
+        console.error('Error updating session:', updateError);
+        throw new Error(`Failed to update session: ${updateError.message}`);
       }
+
+      console.log('Session updated successfully:', updateData);
+
+      // Create the initial participant (owner)
+      const { data: participantData, error: participantError } = await supabase
+        .from('bill_participants')
+        .insert([
+          {
+            session_id: sessionId,
+            name: 'You',
+            is_owner: true
+          }
+        ])
+        .select()
+        .single();
+
+      if (participantError) {
+        console.error('Error creating participant:', participantError);
+        throw new Error(`Failed to create participant: ${participantError.message}`);
+      }
+
+      console.log('Participant created successfully:', participantData);
+
+      // Store owner's participant ID in localStorage
+      localStorage.setItem(`session_${sessionId}_owner`, participantData.id);
+
+      // Navigate to join page
+      router.push(`/join?session=${sessionId}`);
     } catch (error) {
-      console.error('Error updating split details:', error);
-      setError('Failed to save split details. Please try again.');
+      console.error('Error in handleContinue:', error);
+      setError(error instanceof Error ? error.message : 'Failed to save split details. Please try again.');
     } finally {
       setIsUpdating(false);
+    }
+  };
+
+  const handleShare = async () => {
+    if (!sessionData) return;
+    
+    const joinUrl = `${window.location.origin}/join?session=${sessionId}`;
+    
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: 'Join Bill Split',
+          text: `Join me in splitting the bill for ${sessionData.restaurant_name}`,
+          url: joinUrl
+        });
+      } catch (err) {
+        if (err instanceof Error && err.name !== 'AbortError') {
+          console.error('Error sharing:', err);
+        }
+      }
+    } else {
+      try {
+        await navigator.clipboard.writeText(joinUrl);
+        setShowShareSuccess(true);
+        setTimeout(() => setShowShareSuccess(false), 2000);
+      } catch (err) {
+        console.error('Error copying to clipboard:', err);
+      }
     }
   };
 
@@ -111,7 +171,24 @@ export default function Split() {
 
         {/* Split Settings */}
         <div className="w-full space-y-6">
-          <h2 className="text-lg font-semibold text-gray-800">How would you like to split?</h2>
+          <div className="flex justify-between items-center">
+            <h2 className="text-lg font-semibold text-gray-800">How would you like to split?</h2>
+            <button
+              onClick={handleShare}
+              className="p-2 rounded-lg border-2 border-blue-500 text-blue-600 hover:bg-blue-50"
+              title="Share join link"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.367 2.684 3 3 0 00-5.367-2.684z" />
+              </svg>
+            </button>
+          </div>
+
+          {showShareSuccess && (
+            <div className="absolute top-4 right-4 bg-green-100 text-green-800 px-4 py-2 rounded-lg shadow-lg">
+              Link copied to clipboard!
+            </div>
+          )}
 
           {/* Split Type Selection */}
           <div className="grid grid-cols-2 gap-3">

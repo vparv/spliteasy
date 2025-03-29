@@ -78,7 +78,7 @@ export default function Setup() {
           tip_amount: tip,
           total_amount: total,
           tip_percentage: formData.tipPercentage,
-          status: 'setup'
+          status: 'setup_completed'
         })
         .eq('id', sessionId);
 
