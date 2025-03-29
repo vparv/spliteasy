@@ -8,6 +8,7 @@ import { useRouter } from 'next/navigation';
 export default function Pay() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [isComplete, setIsComplete] = useState(false);
+  const [venmoInitiated, setVenmoInitiated] = useState(false);
   const router = useRouter();
 
   // Mock function to simulate Apple Pay payment
@@ -20,9 +21,29 @@ export default function Pay() {
     }, 2000);
   };
 
+  // Handle Venmo payment
+  const handleVenmo = () => {
+    // Mock Venmo username
+    const venmoUsername = 'vparv';
+    const amount = '25.00';
+    const note = 'Split payment';
+    
+    // Create Venmo deep link
+    const venmoUrl = `venmo://paycharge?txn=pay&recipients=${venmoUsername}&amount=${amount}&note=${encodeURIComponent(note)}`;
+    
+    // Set Venmo as initiated
+    setVenmoInitiated(true);
+    
+    // Open Venmo app
+    window.location.href = venmoUrl;
+  };
+
   const handleContinue = () => {
     router.push('/virtual-card');
   };
+
+  // Check if we should enable the continue button
+  const canContinue = isComplete || venmoInitiated;
 
   return (
     <div className="min-h-screen bg-white flex flex-col items-center p-6">
@@ -68,6 +89,44 @@ export default function Pay() {
           </div>
         )}
 
+        {/* Payment Options */}
+        {!isComplete && (
+          <div className="w-full space-y-4">
+            <button
+              onClick={handleApplePay}
+              disabled={isProcessing || venmoInitiated}
+              className={`w-full py-4 px-6 bg-black text-white rounded-2xl transition-all duration-300 font-medium text-lg flex items-center justify-center ${
+                (isProcessing || venmoInitiated) ? 'opacity-50 cursor-not-allowed' : 'hover:bg-gray-900'
+              }`}
+            >
+              {isProcessing ? (
+                <div className="flex items-center space-x-2">
+                  <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+                  <span>Processing...</span>
+                </div>
+              ) : (
+                <Image
+                  src="/images/apple-pay.svg"
+                  alt="Apple Pay"
+                  width={50}
+                  height={32}
+                  className="h-8 w-auto invert"
+                />
+              )}
+            </button>
+
+            <button
+              onClick={handleVenmo}
+              disabled={isProcessing || venmoInitiated}
+              className={`w-full py-4 px-6 bg-[#008CFF] text-white rounded-2xl transition-all duration-300 font-medium text-lg flex items-center justify-center ${
+                (isProcessing || venmoInitiated) ? 'opacity-50 cursor-not-allowed' : 'hover:bg-[#0074D4]'
+              }`}
+            >
+              <span className="font-bold">Venmo</span>
+            </button>
+          </div>
+        )}
+
         {/* Navigation */}
         <div className="flex w-full space-x-4">
           <Link
@@ -77,28 +136,13 @@ export default function Pay() {
             Back
           </Link>
           <button
-            onClick={isComplete ? handleContinue : handleApplePay}
-            disabled={isProcessing}
-            className={`w-1/2 py-4 px-6 bg-black text-white rounded-2xl transition-all duration-300 font-medium text-lg flex items-center justify-center ${
-              isProcessing ? 'opacity-50 cursor-not-allowed' : 'hover:bg-gray-900'
+            onClick={handleContinue}
+            disabled={!canContinue}
+            className={`w-1/2 py-4 px-6 bg-blue-600 text-white rounded-2xl transition-all duration-300 font-medium text-lg ${
+              canContinue ? 'hover:bg-blue-700' : 'opacity-50 cursor-not-allowed'
             }`}
           >
-            {isProcessing ? (
-              <div className="flex items-center space-x-2">
-                <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
-                <span>Processing...</span>
-              </div>
-            ) : isComplete ? (
-              <span>Continue</span>
-            ) : (
-              <Image
-                src="/images/apple-pay.svg"
-                alt="Apple Pay"
-                width={50}
-                height={32}
-                className="h-8 w-auto invert"
-              />
-            )}
+            Continue
           </button>
         </div>
       </div>
