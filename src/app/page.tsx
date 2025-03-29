@@ -5,8 +5,9 @@ export default function Home() {
     <div className="min-h-screen bg-gradient-to-br from-white to-blue-50 flex flex-col items-center justify-center p-6">
       <div className="w-full max-w-md mx-auto px-8 py-12 flex flex-col items-center justify-center text-center space-y-12 bg-white/80 backdrop-blur-sm rounded-2xl shadow-xl">
         {/* App name */}
-        <h1 className="text-6xl font-extrabold tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-blue-600 to-purple-600 font-sans">
-          Splitsy
+        <h1 className="text-7xl font-black tracking-tighter text-transparent bg-clip-text bg-gradient-to-r from-[#4F46E5] via-[#7C3AED] to-[#9333EA] font-sans mb-2 animate-gradient-x hover:scale-105 transition-transform duration-300 ease-out">
+          Venmo Me
+          <span className="block text-7xl italic mt-1">Now</span>
         </h1>
         
         {/* Tagline */}
