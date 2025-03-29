@@ -48,12 +48,37 @@ export default function Select() {
     );
 
     if (existingSelection) {
-      setSelections(selections.filter(s => !(s.itemId === itemId && s.personId === personId)));
-    } else {
-      const itemTotal = getItemTotal(itemId);
-      if (itemTotal < 100) {
-        setSelections([...selections, { itemId, personId, percentage: 100 - itemTotal }]);
+      // Remove the person's selection
+      const newSelections = selections.filter(s => !(s.itemId === itemId && s.personId === personId));
+      
+      // Recalculate percentages for remaining people on this item
+      const itemSelections = newSelections.filter(s => s.itemId === itemId);
+      const numPeople = itemSelections.length;
+      
+      if (numPeople > 0) {
+        const evenSplit = 100 / numPeople;
+        const updatedSelections = newSelections.map(s => 
+          s.itemId === itemId ? { ...s, percentage: evenSplit } : s
+        );
+        setSelections(updatedSelections);
+      } else {
+        setSelections(newSelections);
       }
+    } else {
+      // Add new selection
+      const itemSelections = selections.filter(s => s.itemId === itemId);
+      const numPeople = itemSelections.length + 1; // Including the new person
+      const evenSplit = 100 / numPeople;
+
+      // Update all selections for this item with the new even split
+      const updatedSelections = selections
+        .filter(s => s.itemId !== itemId) // Remove all selections for this item
+        .concat(
+          itemSelections.map(s => ({ ...s, percentage: evenSplit })) // Add back existing selections with new percentage
+        )
+        .concat([{ itemId, personId, percentage: evenSplit }]); // Add the new selection
+
+      setSelections(updatedSelections);
     }
   };
 
@@ -139,19 +164,10 @@ export default function Select() {
                       >
                         {person.name}
                         {getPersonShare(item.id, person.id) > 0 && 
-                          ` (${getPersonShare(item.id, person.id)}%)`
+                          ` (${getPersonShare(item.id, person.id).toFixed(2)}%)`
                         }
                       </button>
                     ))}
-                  </div>
-                  <div className="text-sm text-gray-500">
-                    {getItemTotal(item.id) === 100 ? (
-                      <span className="text-green-600">✓ Fully allocated</span>
-                    ) : (
-                      <span>
-                        {100 - getItemTotal(item.id)}% remaining to allocate
-                      </span>
-                    )}
                   </div>
                 </div>
               )}
