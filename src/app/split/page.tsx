@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 
@@ -11,6 +11,14 @@ interface SessionData {
 }
 
 export default function Split() {
+  return (
+    <Suspense fallback={<div>Loading...</div>}>
+      <SplitContent />
+    </Suspense>
+  );
+}
+
+function SplitContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const sessionId = searchParams.get('session');

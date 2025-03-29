@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 
@@ -15,6 +15,14 @@ interface ParticipantStatus extends Participant {
 }
 
 export default function WaitingPage() {
+  return (
+    <Suspense fallback={<div>Loading...</div>}>
+      <WaitingPageContent />
+    </Suspense>
+  );
+}
+
+function WaitingPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const sessionId = searchParams.get('session');
@@ -26,7 +34,7 @@ export default function WaitingPage() {
 
   // Subscribe to changes in item_selections
   useEffect(() => {
-    if (!sessionId) {
+    if (!sessionId || !participantId) {
       router.push('/');
       return;
     }
@@ -68,7 +76,7 @@ export default function WaitingPage() {
 
         // If everyone has selected, proceed to summary
         if (participantsWithStatus.every(p => p.has_selected)) {
-          router.push(`/summary?session=${sessionId}`);
+          router.push(`/summary?session=${sessionId}&participant=${participantId}`);
         }
       } catch (error) {
         console.error('Error fetching participants:', error);

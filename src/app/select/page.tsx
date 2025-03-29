@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 
@@ -43,6 +43,14 @@ const mockBillItems: BillItem[] = [
 ];
 
 export default function Select() {
+  return (
+    <Suspense fallback={<div>Loading...</div>}>
+      <SelectContent />
+    </Suspense>
+  );
+}
+
+function SelectContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const sessionId = searchParams.get('session');
