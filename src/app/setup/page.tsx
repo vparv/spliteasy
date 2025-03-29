@@ -135,12 +135,12 @@ function SetupContent() {
                 name="restaurantName"
                 value={formData.restaurantName}
                 onChange={handleInputChange}
-                className="w-full px-4 py-3 rounded-xl border border-gray-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all outline-none"
+                className="w-full px-4 py-3 rounded-xl text-black border border-gray-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all outline-none"
                 placeholder="Enter restaurant name"
               />
             </div>
             <div className="space-y-2">
-              <label htmlFor="date" className="block text-sm font-medium text-gray-700">
+              <label htmlFor="date" className="block text-sm text-black font-medium text-gray-700">
                 Date
               </label>
               <input
@@ -149,7 +149,7 @@ function SetupContent() {
                 name="date"
                 value={formData.date}
                 onChange={handleInputChange}
-                className="w-full px-4 py-3 rounded-xl border border-gray-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all outline-none"
+                className="w-full px-4 py-3 rounded-xl border text-black border-gray-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all outline-none"
               />
             </div>
           </div>
