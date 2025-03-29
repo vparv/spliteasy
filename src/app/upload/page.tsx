@@ -3,12 +3,30 @@
 import Link from 'next/link';
 import { useRef, useState } from 'react';
 import Image from 'next/image';
-import { supabase } from '@/lib/supabase';
 import { useRouter } from 'next/navigation';
+import OpenAI from 'openai';
+import { supabase } from '@/lib/supabase';
+
+interface ItemizedList {
+  items: Array<{
+    name: string;
+    price: number;
+  }>;
+}
+
+interface RawItem {
+  name: string | undefined;
+  price: string | number | undefined;
+}
+
+const openai = new OpenAI({
+  apiKey: process.env.NEXT_PUBLIC_OPENAI_API_KEY,
+  dangerouslyAllowBrowser: true
+});
 
 export default function Upload() {
   const [preview, setPreview] = useState<string | null>(null);
-  const [isCreatingSession, setIsCreatingSession] = useState(false);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const router = useRouter();
@@ -31,33 +49,135 @@ export default function Upload() {
     }
   };
 
+  const parseAnalysis = (analysisText: string | null): ItemizedList => {
+    if (!analysisText) {
+      throw new Error('No analysis text provided');
+    }
+
+    try {
+      // Try to parse the response as JSON
+      let parsed;
+      try {
+        parsed = JSON.parse(analysisText);
+      } catch (e) {
+        // If direct parsing fails, try to find a JSON object in the text
+        const jsonMatch = analysisText.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          parsed = JSON.parse(jsonMatch[0]);
+        } else {
+          throw new Error('Could not find valid JSON in the response');
+        }
+      }
+      
+      // Validate the structure
+      if (!parsed || typeof parsed !== 'object') {
+        throw new Error('Invalid response format: not an object');
+      }
+
+      if (!Array.isArray(parsed.items)) {
+        throw new Error('Invalid response format: items is not an array');
+      }
+
+      // Convert and validate each item
+      const validatedItems = parsed.items.map((item: RawItem, index: number) => {
+        if (!item.name) {
+          throw new Error(`Item at index ${index} is missing a name`);
+        }
+
+        const price = typeof item.price === 'string' 
+          ? parseFloat(item.price.replace(/[^0-9.-]+/g, ''))
+          : Number(item.price);
+
+        if (isNaN(price)) {
+          throw new Error(`Invalid price for item "${item.name}"`);
+        }
+
+        return {
+          name: String(item.name),
+          price: price
+        };
+      });
+
+      return { items: validatedItems };
+    } catch (e) {
+      console.error('Failed to parse analysis:', e);
+      throw new Error(`Failed to parse receipt: ${e instanceof Error ? e.message : 'Unknown error'}`);
+    }
+  };
+
   const handleContinue = async () => {
     if (!preview) return;
     
     try {
-      setIsCreatingSession(true);
+      setIsAnalyzing(true);
       setError(null);
 
-      // Create a new session
-      const { data: session, error: sessionError } = await supabase
-        .from('bill_sessions')
+      // Remove the data:image/[type];base64, prefix
+      const base64Image = preview.split(',')[1];
+
+      // Analyze the receipt with GPT-4V
+      const response = await openai.chat.completions.create({
+        model: "gpt-4o",
+        messages: [
+          {
+            role: "user",
+            content: [
+              {
+                type: "text",
+                text: "Analyze this receipt and return ONLY a JSON object in this exact format, with no additional text:\n{\n  \"items\": [\n    { \"name\": \"item name\", \"price\": number }\n  ]\n}\nEnsure prices are numbers without currency symbols."
+              },
+              {
+                type: "image_url",
+                image_url: {
+                  url: `data:image/jpeg;base64,${base64Image}`
+                }
+              }
+            ]
+          }
+        ],
+        max_tokens: 1000
+      });
+
+      const rawAnalysis = response.choices[0].message.content;
+      
+      // Parse and validate the response
+      let parsedItems;
+      try {
+        parsedItems = parseAnalysis(rawAnalysis);
+      } catch (parseError) {
+        throw new Error(`Failed to parse receipt items: ${parseError instanceof Error ? parseError.message : 'Unknown error'}`);
+      }
+
+      if (parsedItems.items.length === 0) {
+        throw new Error('No items were found in the receipt');
+      }
+      
+      // Generate a unique receipt ID (timestamp + random string)
+      const receiptId = `${Date.now()}-${Math.random().toString(36).substring(2, 15)}`;
+      
+      // Store the receipt data in Supabase
+      const { error: insertError } = await supabase
+        .from('receipts')
         .insert([
           {
-            status: 'created'
+            id: receiptId,
+            raw_analysis: rawAnalysis,
+            itemized_list: parsedItems,
+            created_at: new Date().toISOString()
           }
-        ])
-        .select()
-        .single();
+        ]);
 
-      if (sessionError) throw sessionError;
+      if (insertError) {
+        throw new Error(`Failed to save receipt: ${insertError.message}`);
+      }
 
-      // Navigate to setup page with session ID
-      router.push(`/setup?session=${session.id}`);
+      // Navigate to the next page with the receipt ID
+      router.push(`/items?receipt=${receiptId}`);
     } catch (error) {
-      console.error('Error creating session:', error);
-      setError('Failed to create session. Please try again.');
+      console.error('Error processing receipt:', error);
+      setError(error instanceof Error ? error.message : 'Failed to process receipt. Please try again.');
     } finally {
-      setIsCreatingSession(false);
+      setIsAnalyzing(false);
     }
   };
 
@@ -128,17 +248,17 @@ export default function Upload() {
           </Link>
           <button 
             onClick={handleContinue}
-            disabled={!preview || isCreatingSession}
+            disabled={!preview || isAnalyzing}
             className={`w-1/2 py-4 px-6 bg-blue-500 text-white rounded-2xl transition-all duration-300 font-medium text-lg text-center hover:bg-blue-600 relative
-              ${(!preview || isCreatingSession) && 'opacity-50 cursor-not-allowed'}`}
+              ${(!preview || isAnalyzing) && 'opacity-50 cursor-not-allowed'}`}
           >
-            {isCreatingSession ? (
+            {isAnalyzing ? (
               <div className="flex items-center justify-center">
                 <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                 </svg>
-                Creating...
+                Analyzing...
               </div>
             ) : (
               'Continue'
