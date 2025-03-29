@@ -63,8 +63,6 @@ export default function VirtualCard() {
     setTimeout(() => {
       setIsGenerating(false);
       setIsComplete(true);
-      // Navigate to card details page after generation
-      router.push('/virtual-card/details');
     }, 2000);
   };
 
@@ -156,7 +154,7 @@ export default function VirtualCard() {
                 <span>Generating...</span>
               </div>
             ) : isComplete ? (
-              <span>Continue</span>
+              <span>Show Card</span>
             ) : collectionStatus.remainingAmount > 0 ? (
               <span>Waiting...</span>
             ) : (
