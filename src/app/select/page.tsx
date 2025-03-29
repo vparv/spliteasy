@@ -37,6 +37,8 @@ export default function Select() {
     setExpandedItem(expandedItem === itemId ? null : itemId);
   };
 
+  // Utility function to calculate total percentage allocated for an item
+  // Kept for future validation implementation to ensure total split equals 100%
   const getItemTotal = (itemId: number) => {
     const itemSelections = selections.filter(s => s.itemId === itemId);
     return itemSelections.reduce((sum, s) => sum + s.percentage, 0);

@@ -1,7 +1,6 @@
 'use client';
 
 import Link from 'next/link';
-import { useState, useEffect } from 'react';
 
 interface SplitSummary {
   totalAmount: number;
@@ -20,7 +19,7 @@ interface SplitSummary {
 
 export default function Summary() {
   // This would come from your app's state management in a real app
-  const [summary, setSummary] = useState<SplitSummary>({
+  const summary: SplitSummary = {
     totalAmount: 100.00,
     splitType: 'equal',
     numberOfPeople: 4,
@@ -58,7 +57,7 @@ export default function Summary() {
         ],
       },
     ],
-  });
+  };
 
   return (
     <div className="min-h-screen bg-white flex flex-col items-center p-6">

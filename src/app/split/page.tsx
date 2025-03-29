@@ -29,11 +29,6 @@ export default function Split() {
   // Placeholder total amount - this would come from the previous page in a real app
   const totalAmount = 100.00;
 
-  const handleInputChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const { name, value } = e.target;
-    setSplitData(prev => ({ ...prev, [name]: value }));
-  };
-
   const handleNumberSelect = (number: number) => {
     setSplitData(prev => ({ ...prev, numberOfPeople: number }));
   };
@@ -133,7 +128,7 @@ export default function Split() {
           ) : (
             <div className="bg-blue-50 p-4 rounded-xl space-y-3">
               <p className="text-sm text-gray-500">
-                On the next screen, you'll be able to:
+                On the next screen, you&apos;ll be able to:
               </p>
               <ul className="text-sm text-gray-600 space-y-2 list-disc pl-4">
                 <li>Select specific items for each person</li>
