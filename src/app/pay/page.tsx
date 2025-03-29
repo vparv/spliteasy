@@ -21,7 +21,7 @@ export default function Pay() {
   };
 
   const handleContinue = () => {
-    router.push('/');
+    router.push('/virtual-card');
   };
 
   return (
