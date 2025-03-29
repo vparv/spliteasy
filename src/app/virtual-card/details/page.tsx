@@ -1,11 +1,14 @@
 'use client';
 
 import Link from 'next/link';
+import Image from 'next/image';
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 
 export default function VirtualCardDetails() {
   const [isRevealed, setIsRevealed] = useState(false);
+  const [isAddingToWallet, setIsAddingToWallet] = useState(false);
+  const [isAddedToWallet, setIsAddedToWallet] = useState(false);
   const router = useRouter();
 
   // Mock card details
@@ -16,6 +19,15 @@ export default function VirtualCardDetails() {
     balance: '$100.00',
     cardholderName: 'VIRTUAL CARD',
     issuer: 'VISA'
+  };
+
+  const handleAddToWallet = () => {
+    setIsAddingToWallet(true);
+    // Simulate adding to wallet
+    setTimeout(() => {
+      setIsAddingToWallet(false);
+      setIsAddedToWallet(true);
+    }, 1500);
   };
 
   return (
@@ -110,6 +122,50 @@ export default function VirtualCardDetails() {
             </div>
           </div>
         </div>
+
+        {/* Add to Wallet Button */}
+        <button
+          onClick={handleAddToWallet}
+          disabled={isAddingToWallet || isAddedToWallet}
+          className={`w-full py-4 px-6 bg-black text-white rounded-2xl transition-all duration-300 font-medium text-lg flex items-center justify-center space-x-2 ${
+            (isAddingToWallet || isAddedToWallet) ? 'opacity-50 cursor-not-allowed' : 'hover:bg-gray-900'
+          }`}
+        >
+          {isAddingToWallet ? (
+            <>
+              <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+              <span>Adding to Wallet...</span>
+            </>
+          ) : isAddedToWallet ? (
+            <>
+              <svg
+                className="w-5 h-5"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M5 13l4 4L19 7"
+                />
+              </svg>
+              <span>Added to Wallet</span>
+            </>
+          ) : (
+            <>
+              <Image
+                src="/images/wallet.svg"
+                alt="Wallet"
+                width={24}
+                height={24}
+                className="invert"
+              />
+              <span>Add to Wallet</span>
+            </>
+          )}
+        </button>
 
         {/* Warning Message */}
         <div className="text-sm text-gray-500 text-center px-4">
