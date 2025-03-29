@@ -123,10 +123,10 @@ export default function Summary() {
             Back
           </Link>
           <Link 
-            href="/"
+            href="/pay"
             className="w-1/2 py-4 px-6 bg-blue-500 text-white rounded-2xl transition-all duration-300 font-medium text-lg text-center hover:bg-blue-600"
           >
-            Done
+            Pay Now
           </Link>
         </div>
       </div>
