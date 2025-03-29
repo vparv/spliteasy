@@ -111,6 +111,16 @@ function SummaryContent() {
           '8': { id: '8', name: 'Chocolate Cake', price: 7.99, category: 'Desserts' },
         };
 
+        // Group selections by item to calculate percentages
+        const itemSelections: Record<string, { total: number, selections: ItemSelection[] }> = {};
+        selectionsData.forEach(selection => {
+          if (!itemSelections[selection.item_id]) {
+            itemSelections[selection.item_id] = { total: 0, selections: [] };
+          }
+          itemSelections[selection.item_id].total += selection.percentage;
+          itemSelections[selection.item_id].selections.push(selection);
+        });
+
         // Calculate amounts for each participant
         const enrichedParticipants = participantsData.map(participant => {
           const participantSelections = selectionsData.filter(s => s.participant_id === participant.id);
@@ -124,10 +134,15 @@ function SummaryContent() {
           } else {
             const items = participantSelections.map(selection => {
               const item = mockItems[selection.item_id];
+              // Calculate the actual percentage based on total percentages for this item
+              const totalPercentage = itemSelections[selection.item_id].total;
+              const adjustedPercentage = (selection.percentage / totalPercentage) * 100;
+              const itemPrice = item.price * (adjustedPercentage / 100);
+              
               return {
                 name: item.name,
-                price: (item.price * selection.percentage) / 100,
-                percentage: selection.percentage
+                price: itemPrice,
+                percentage: adjustedPercentage
               };
             });
 
@@ -177,12 +192,30 @@ function SummaryContent() {
         </h1>
 
         {/* Total Amount Card */}
-        <div className="w-full bg-blue-50 p-6 rounded-xl space-y-3">
+        <div className="w-full bg-blue-50 p-6 rounded-xl space-y-4">
           <div className="flex justify-between items-center">
             <span className="text-lg font-medium text-gray-700">Total Bill</span>
             <span className="text-3xl font-bold text-blue-600">
               ${sessionData.total_amount.toFixed(2)}
             </span>
+          </div>
+          <div className="space-y-2">
+            <div className="flex justify-between items-center text-sm">
+              <span className="text-gray-600">Subtotal</span>
+              <span className="font-medium text-gray-800">${sessionData.subtotal.toFixed(2)}</span>
+            </div>
+            <div className="flex justify-between items-center text-sm">
+              <span className="text-gray-600">
+                Tax ({(sessionData.tax_amount / sessionData.subtotal * 100).toFixed(1)}%)
+              </span>
+              <span className="font-medium text-gray-800">${sessionData.tax_amount.toFixed(2)}</span>
+            </div>
+            <div className="flex justify-between items-center text-sm">
+              <span className="text-gray-600">
+                Tip ({(sessionData.tip_amount / sessionData.subtotal * 100).toFixed(1)}%)
+              </span>
+              <span className="font-medium text-gray-800">${sessionData.tip_amount.toFixed(2)}</span>
+            </div>
           </div>
           <div className="text-sm text-gray-500">
             Split {sessionData.split_type === 'equal' ? 'equally' : 'by items'} between {sessionData.number_of_participants} people
@@ -193,51 +226,82 @@ function SummaryContent() {
         <div className="w-full space-y-4">
           <h2 className="text-lg font-semibold text-gray-800">Split Details</h2>
           
-          {participants.map((participant) => (
-            <div 
-              key={participant.id} 
-              className={`bg-white border-2 rounded-xl p-4 space-y-3
-                ${participant.id === currentParticipant.id 
-                  ? 'border-blue-500 bg-blue-50' 
-                  : 'border-gray-200'}`}
-            >
-              <div className="flex justify-between items-center">
-                <div className="flex items-center space-x-2">
-                  <span className="font-medium text-gray-900">
-                    {participant.name}
+          {participants.map((participant) => {
+            // Calculate individual breakdowns
+            const subtotalAmount = sessionData.split_type === 'equal' 
+              ? sessionData.subtotal / participants.length
+              : (participant.items?.reduce((sum, item) => sum + item.price, 0) || 0);
+            
+            const taxAmount = sessionData.split_type === 'equal'
+              ? sessionData.tax_amount / participants.length
+              : subtotalAmount * (sessionData.tax_amount / sessionData.subtotal);
+            
+            const tipAmount = sessionData.split_type === 'equal'
+              ? sessionData.tip_amount / participants.length
+              : subtotalAmount * (sessionData.tip_amount / sessionData.subtotal);
+
+            return (
+              <div 
+                key={participant.id} 
+                className={`bg-white border-2 rounded-xl p-4 space-y-3
+                  ${participant.id === currentParticipant.id 
+                    ? 'border-blue-500 bg-blue-50' 
+                    : 'border-gray-200'}`}
+              >
+                <div className="flex justify-between items-center">
+                  <div className="flex items-center space-x-2">
+                    <span className="font-medium text-gray-900">
+                      {participant.name}
+                    </span>
+                    {participant.is_owner && (
+                      <span className="text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full">
+                        Owner
+                      </span>
+                    )}
+                    {participant.id === currentParticipant.id && (
+                      <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">
+                        You
+                      </span>
+                    )}
+                  </div>
+                  <span className="text-xl font-bold text-blue-600">
+                    ${participant.amount?.toFixed(2)}
                   </span>
-                  {participant.is_owner && (
-                    <span className="text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full">
-                      Owner
-                    </span>
-                  )}
-                  {participant.id === currentParticipant.id && (
-                    <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">
-                      You
-                    </span>
-                  )}
                 </div>
-                <span className="text-xl font-bold text-blue-600">
-                  ${participant.amount?.toFixed(2)}
-                </span>
-              </div>
-              
-              {sessionData.split_type === 'custom' && participant.items && participant.items.length > 0 && (
+                
                 <div className="space-y-2">
-                  <div className="h-px bg-gray-200"></div>
-                  {participant.items.map((item, itemIndex) => (
-                    <div key={itemIndex} className="flex justify-between items-center text-sm">
-                      <span className="text-gray-600">{item.name}</span>
-                      <div className="flex items-center space-x-2">
-                        <span className="text-gray-400">({item.percentage}%)</span>
-                        <span className="text-gray-900">${item.price.toFixed(2)}</span>
-                      </div>
-                    </div>
-                  ))}
+                  <div className="flex justify-between items-center text-sm">
+                    <span className="text-gray-600">Subtotal Share</span>
+                    <span className="font-medium text-gray-800">${subtotalAmount.toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between items-center text-sm">
+                    <span className="text-gray-600">Tax Share</span>
+                    <span className="font-medium text-gray-800">${taxAmount.toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between items-center text-sm">
+                    <span className="text-gray-600">Tip Share</span>
+                    <span className="font-medium text-gray-800">${tipAmount.toFixed(2)}</span>
+                  </div>
                 </div>
-              )}
-            </div>
-          ))}
+                
+                {sessionData.split_type === 'custom' && participant.items && participant.items.length > 0 && (
+                  <div className="space-y-2">
+                    <div className="h-px bg-gray-200"></div>
+                    <div className="text-sm font-medium text-gray-700">Items:</div>
+                    {participant.items.map((item, itemIndex) => (
+                      <div key={itemIndex} className="flex justify-between items-center text-sm">
+                        <span className="text-gray-600">{item.name}</span>
+                        <div className="flex items-center space-x-2">
+                          <span className="text-gray-400">({item.percentage.toFixed(1)}%)</span>
+                          <span className="text-gray-900">${item.price.toFixed(2)}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
 
         {/* Navigation */}
