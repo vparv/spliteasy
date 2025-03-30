@@ -106,7 +106,7 @@ function SummaryContent() {
 
         // Convert receipt items to BillItems
         const billItems: Record<string, BillItem> = {};
-        receiptData.itemized_list.items.forEach((item, index) => {
+        receiptData.itemized_list.items.forEach((item: { name: string; price: number }, index: number) => {
           billItems[index.toString()] = {
             id: index.toString(),
             name: item.name,

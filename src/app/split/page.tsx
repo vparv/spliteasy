@@ -28,7 +28,9 @@ function SplitContent() {
 
   const [splitData, setSplitData] = useState({
     splitType: 'equal' as 'equal' | 'custom',
-    numberOfPeople: 2
+    numberOfPeople: 2,
+    name: '',
+    venmoUsername: ''
   });
 
   // Fetch session data
@@ -66,6 +68,14 @@ function SplitContent() {
       setIsUpdating(true);
       setError(null);
 
+      // Validate inputs
+      if (!splitData.name.trim()) {
+        throw new Error('Please enter your name');
+      }
+      if (!splitData.venmoUsername.trim()) {
+        throw new Error('Please enter your Venmo username');
+      }
+
       console.log('Updating session with:', {
         split_type: splitData.splitType,
         number_of_participants: splitData.numberOfPeople,
@@ -96,7 +106,8 @@ function SplitContent() {
         .insert([
           {
             session_id: sessionId,
-            name: 'You',
+            name: splitData.name.trim(),
+            venmo_username: splitData.venmoUsername.trim(),
             is_owner: true
           }
         ])
@@ -150,6 +161,40 @@ function SplitContent() {
 
         {/* Split Settings */}
         <div className="w-full space-y-6">
+          {/* Your Information */}
+          <div className="space-y-4">
+            <h2 className="text-lg font-semibold text-gray-800">Your Information</h2>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Your Name
+                </label>
+                <input
+                  type="text"
+                  value={splitData.name}
+                  onChange={(e) => setSplitData(prev => ({ ...prev, name: e.target.value }))}
+                  placeholder="Enter your name"
+                  className="w-full px-4 py-2 border-2 border-gray-200 rounded-xl focus:border-blue-500 focus:outline-none transition-colors"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Venmo Username
+                </label>
+                <div className="relative">
+                  <span className="absolute left-4 top-2 text-gray-500">@</span>
+                  <input
+                    type="text"
+                    value={splitData.venmoUsername}
+                    onChange={(e) => setSplitData(prev => ({ ...prev, venmoUsername: e.target.value }))}
+                    placeholder="your_venmo_username"
+                    className="w-full pl-8 pr-4 py-2 border-2 border-gray-200 rounded-xl focus:border-blue-500 focus:outline-none transition-colors"
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+
           <h2 className="text-lg font-semibold text-gray-800">How would you like to split?</h2>
 
           {/* Split Type Selection */}
