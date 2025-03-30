@@ -58,6 +58,7 @@ function PayContent() {
   const [sessionData, setSessionData] = useState<SessionData | null>(null);
   const [currentParticipant, setCurrentParticipant] = useState<Participant | null>(null);
   const [amount, setAmount] = useState<number>(0);
+  const [ownerData, setOwnerData] = useState<{ venmo_username: string } | null>(null);
 
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -117,6 +118,19 @@ function PayContent() {
 
         if (participantError) throw participantError;
         if (!participantData) throw new Error('Participant not found');
+
+        // Fetch owner's data to get Venmo username
+        const { data: ownerData, error: ownerError } = await supabase
+          .from('bill_participants')
+          .select('venmo_username')
+          .eq('session_id', sessionId)
+          .eq('is_owner', true)
+          .single();
+
+        if (ownerError) throw ownerError;
+        if (!ownerData) throw new Error('Owner not found');
+
+        setOwnerData(ownerData);
 
         // Calculate amount based on split type
         if (sessionData.split_type === 'equal') {
@@ -196,12 +210,15 @@ function PayContent() {
 
   // Handle Venmo payment
   const handleVenmo = () => {
-    // Mock Venmo username
-    const venmoUsername = 'vparv';
+    if (!ownerData?.venmo_username) {
+      setError('Owner\'s Venmo username not found');
+      return;
+    }
+    
     const note = `Split payment for ${sessionData?.restaurant_name || 'bill'}`;
     
     // Create Venmo deep link
-    const venmoUrl = `venmo://paycharge?txn=pay&recipients=${venmoUsername}&amount=${amount.toFixed(2)}&note=${encodeURIComponent(note)}`;
+    const venmoUrl = `venmo://paycharge?txn=pay&recipients=${ownerData.venmo_username}&amount=${amount.toFixed(2)}&note=${encodeURIComponent(note)}`;
     
     // Set Venmo as initiated
     setVenmoInitiated(true);
