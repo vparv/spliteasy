@@ -5,6 +5,11 @@ import { useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 
+interface ReceiptItem {
+  name: string;
+  price: number;
+}
+
 export default function Setup() {
   return (
     <Suspense fallback={<div>Loading...</div>}>
@@ -17,7 +22,9 @@ function SetupContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const sessionId = searchParams.get('session');
+  const receiptId = searchParams.get('receipt');
   const [isUpdating, setIsUpdating] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const [formData, setFormData] = useState({
@@ -27,6 +34,46 @@ function SetupContent() {
     tax: '',
     tipPercentage: 18,
   });
+
+  // Fetch receipt data and pre-fill form
+  useEffect(() => {
+    async function fetchReceiptData() {
+      if (!receiptId) return;
+
+      try {
+        setIsLoading(true);
+        const { data: receiptData, error: receiptError } = await supabase
+          .from('receipts')
+          .select('*')
+          .eq('id', receiptId)
+          .single();
+
+        if (receiptError) throw receiptError;
+        if (!receiptData) throw new Error('Receipt not found');
+
+        // Calculate subtotal from items
+        const subtotal = receiptData.itemized_list.items.reduce(
+          (sum: number, item: ReceiptItem) => sum + item.price,
+          0
+        );
+
+        setFormData(prev => ({
+          ...prev,
+          restaurantName: receiptData.merchant || '',
+          date: receiptData.date || new Date().toISOString().split('T')[0],
+          subtotal: subtotal.toFixed(2),
+          tax: receiptData.tax?.toFixed(2) || '',
+        }));
+      } catch (error) {
+        console.error('Error fetching receipt:', error);
+        setError('Failed to load receipt details. Please try again.');
+      } finally {
+        setIsLoading(false);
+      }
+    }
+
+    fetchReceiptData();
+  }, [receiptId]);
 
   // Redirect if no session ID
   useEffect(() => {
@@ -110,6 +157,14 @@ function SetupContent() {
 
   if (!sessionId) {
     return null; // Don't render anything while redirecting
+  }
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-white flex items-center justify-center">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500" />
+      </div>
+    );
   }
 
   return (

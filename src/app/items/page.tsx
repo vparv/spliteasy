@@ -16,6 +16,9 @@ interface ReceiptData {
   itemized_list: {
     items: ReceiptItem[];
   };
+  merchant?: string;
+  date?: string;
+  tax?: number;
   created_at: string;
 }
 
@@ -89,7 +92,8 @@ function ItemsContent() {
         .from('bill_sessions')
         .insert([
           {
-            status: 'created'
+            status: 'created',
+            receipt_id: receiptId
           }
         ])
         .select()
@@ -98,7 +102,7 @@ function ItemsContent() {
       if (sessionError) throw sessionError;
 
       // Navigate to setup page with session ID
-      router.push(`/setup?session=${session.id}`);
+      router.push(`/setup?session=${session.id}&receipt=${receiptId}`);
     } catch (error) {
       console.error('Error creating session:', error);
       setError('Failed to create session. Please try again.');
@@ -119,13 +123,38 @@ function ItemsContent() {
     <div className="min-h-screen bg-white flex flex-col items-center p-6">
       <div className="w-full max-w-md mx-auto flex flex-col space-y-8">
         {/* Header */}
-        <div className="text-center">
+        <div className="text-center space-y-2">
           <h1 className="text-4xl font-bold tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-blue-600 to-purple-600">
             Receipt Items
           </h1>
-          <p className="mt-2 text-gray-600">
-            Total: ${total.toFixed(2)}
-          </p>
+          {receiptData?.merchant && (
+            <p className="text-lg font-medium text-gray-900">
+              {receiptData.merchant}
+            </p>
+          )}
+          {receiptData?.date && (
+            <p className="text-sm text-gray-600">
+              {new Date(receiptData.date).toLocaleDateString()}
+            </p>
+          )}
+          <div className="flex justify-between items-center px-4 py-2 bg-gray-50 rounded-lg">
+            <div className="space-y-1">
+              <p className="text-sm text-gray-600">Subtotal</p>
+              {receiptData?.tax !== undefined && (
+                <p className="text-sm text-gray-600">Tax</p>
+              )}
+              <p className="font-medium text-gray-600">Total</p>
+            </div>
+            <div className="space-y-1 text-right">
+              <p className="text-sm text-gray-600">
+                ${(receiptData?.tax !== undefined ? total - receiptData.tax : total).toFixed(2)}
+              </p>
+              {receiptData?.tax !== undefined && (
+                <p className="text-sm text-gray-600">${receiptData.tax.toFixed(2)}</p>
+              )}
+              <p className="font-medium text-gray-600">${total.toFixed(2)}</p>
+            </div>
+          </div>
         </div>
 
         {/* Items List */}

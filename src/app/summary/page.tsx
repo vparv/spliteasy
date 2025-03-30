@@ -9,7 +9,6 @@ interface BillItem {
   id: string;
   name: string;
   price: number;
-  category: string;
 }
 
 interface ItemSelection {
@@ -38,6 +37,17 @@ interface SessionData {
   subtotal: number;
   tax_amount: number;
   tip_amount: number;
+  receipt_id: string;
+}
+
+interface ReceiptData {
+  id: string;
+  itemized_list: {
+    items: Array<{
+      name: string;
+      price: number;
+    }>;
+  };
 }
 
 export default function Summary() {
@@ -74,14 +84,35 @@ function SummaryContent() {
         // Fetch session details
         const { data: sessionData, error: sessionError } = await supabase
           .from('bill_sessions')
-          .select('restaurant_name, total_amount, number_of_participants, split_type, subtotal, tax_amount, tip_amount')
+          .select('restaurant_name, total_amount, number_of_participants, split_type, subtotal, tax_amount, tip_amount, receipt_id')
           .eq('id', sessionId)
           .single();
 
         if (sessionError) throw sessionError;
         if (!sessionData) throw new Error('Session not found');
+        if (!sessionData.receipt_id) throw new Error('Receipt not found');
 
         setSessionData(sessionData);
+
+        // Fetch receipt data
+        const { data: receiptData, error: receiptError } = await supabase
+          .from('receipts')
+          .select('itemized_list')
+          .eq('id', sessionData.receipt_id)
+          .single();
+
+        if (receiptError) throw receiptError;
+        if (!receiptData) throw new Error('Receipt data not found');
+
+        // Convert receipt items to BillItems
+        const billItems: Record<string, BillItem> = {};
+        receiptData.itemized_list.items.forEach((item: { name: string; price: number }, index: number) => {
+          billItems[index.toString()] = {
+            id: index.toString(),
+            name: item.name,
+            price: item.price
+          };
+        });
 
         // Fetch all participants
         const { data: participantsData, error: participantsError } = await supabase
@@ -98,18 +129,6 @@ function SummaryContent() {
           .eq('session_id', sessionId);
 
         if (selectionsError) throw selectionsError;
-
-        // Mock items (replace with real items later)
-        const mockItems: Record<string, BillItem> = {
-          '1': { id: '1', name: 'Chicken Pasta', price: 16.99, category: 'Mains' },
-          '2': { id: '2', name: 'Caesar Salad', price: 12.99, category: 'Starters' },
-          '3': { id: '3', name: 'Garlic Bread', price: 5.99, category: 'Sides' },
-          '4': { id: '4', name: 'Margherita Pizza', price: 18.99, category: 'Mains' },
-          '5': { id: '5', name: 'Tiramisu', price: 8.99, category: 'Desserts' },
-          '6': { id: '6', name: 'Soft Drinks', price: 3.99, category: 'Beverages' },
-          '7': { id: '7', name: 'French Fries', price: 4.99, category: 'Sides' },
-          '8': { id: '8', name: 'Chocolate Cake', price: 7.99, category: 'Desserts' },
-        };
 
         // Group selections by item to calculate percentages
         const itemSelections: Record<string, { total: number, selections: ItemSelection[] }> = {};
@@ -133,7 +152,11 @@ function SummaryContent() {
             };
           } else {
             const items = participantSelections.map(selection => {
-              const item = mockItems[selection.item_id];
+              const item = billItems[selection.item_id];
+              if (!item) {
+                console.error(`Item not found for ID: ${selection.item_id}`);
+                return null;
+              }
               // Calculate the actual percentage based on total percentages for this item
               const totalPercentage = itemSelections[selection.item_id].total;
               const adjustedPercentage = (selection.percentage / totalPercentage) * 100;
@@ -144,7 +167,7 @@ function SummaryContent() {
                 price: itemPrice,
                 percentage: adjustedPercentage
               };
-            });
+            }).filter((item): item is NonNullable<typeof item> => item !== null);
 
             const subtotalAmount = items.reduce((sum, item) => sum + item.price, 0);
             const taxRatio = sessionData.tax_amount / sessionData.subtotal;
