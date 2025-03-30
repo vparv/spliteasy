@@ -8,6 +8,9 @@ import OpenAI from 'openai';
 import { supabase } from '@/lib/supabase';
 
 interface ItemizedList {
+  merchant?: string;
+  date?: string;
+  tax?: number;
   items: Array<{
     name: string;
     price: number;
@@ -78,6 +81,32 @@ export default function Upload() {
         throw new Error('Invalid response format: items is not an array');
       }
 
+      // Parse optional fields
+      let merchant: string | undefined = undefined;
+      let date: string | undefined = undefined;
+      let tax: number | undefined = undefined;
+
+      // Parse merchant if present
+      if (parsed.merchant && typeof parsed.merchant === 'string') {
+        merchant = parsed.merchant;
+      }
+
+      // Parse date if present
+      if (parsed.date && typeof parsed.date === 'string') {
+        date = parsed.date;
+      }
+
+      // Parse tax if present
+      if (parsed.tax !== undefined) {
+        const parsedTax = typeof parsed.tax === 'string' 
+          ? parseFloat(parsed.tax.replace(/[^0-9.-]+/g, ''))
+          : Number(parsed.tax);
+        
+        if (!isNaN(parsedTax)) {
+          tax = parsedTax;
+        }
+      }
+
       // Convert and validate each item
       const validatedItems = parsed.items.map((item: RawItem, index: number) => {
         if (!item.name) {
@@ -98,7 +127,12 @@ export default function Upload() {
         };
       });
 
-      return { items: validatedItems };
+      const result: ItemizedList = { items: validatedItems };
+      if (merchant !== undefined) result.merchant = merchant;
+      if (date !== undefined) result.date = date;
+      if (tax !== undefined) result.tax = tax;
+
+      return result;
     } catch (e) {
       console.error('Failed to parse analysis:', e);
       throw new Error(`Failed to parse receipt: ${e instanceof Error ? e.message : 'Unknown error'}`);
@@ -124,7 +158,7 @@ export default function Upload() {
             content: [
               {
                 type: "text",
-                text: "Analyze this receipt and return ONLY a JSON object in this exact format, with no additional text:\n{\n  \"items\": [\n    { \"name\": \"item name\", \"price\": number }\n  ]\n}\nEnsure prices are numbers without currency symbols."
+                text: "Analyze this receipt and return ONLY a JSON object in this exact format, with no additional text:\n{\n  \"merchant\": \"store name\",\n  \"date\": \"YYYY-MM-DD\",\n  \"tax\": number,\n  \"items\": [\n    { \"name\": \"item name\", \"price\": number }\n  ]\n}\nEnsure prices and tax are numbers without currency symbols. Format the date as YYYY-MM-DD."
               },
               {
                 type: "image_url",
@@ -163,6 +197,9 @@ export default function Upload() {
             id: receiptId,
             raw_analysis: rawAnalysis,
             itemized_list: parsedItems,
+            merchant: parsedItems.merchant,
+            date: parsedItems.date,
+            tax: parsedItems.tax,
             created_at: new Date().toISOString()
           }
         ]);

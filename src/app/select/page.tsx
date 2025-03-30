@@ -9,7 +9,6 @@ interface BillItem {
   id: string;
   name: string;
   price: number;
-  category: string;
 }
 
 interface Participant {
@@ -28,19 +27,23 @@ interface SessionData {
   restaurant_name: string;
   total_amount: number;
   number_of_participants: number;
+  receipt_id: string;
 }
 
-// Mock data for bill items
-const mockBillItems: BillItem[] = [
-  { id: '1', name: 'Chicken Pasta', price: 16.99, category: 'Mains' },
-  { id: '2', name: 'Caesar Salad', price: 12.99, category: 'Starters' },
-  { id: '3', name: 'Garlic Bread', price: 5.99, category: 'Sides' },
-  { id: '4', name: 'Margherita Pizza', price: 18.99, category: 'Mains' },
-  { id: '5', name: 'Tiramisu', price: 8.99, category: 'Desserts' },
-  { id: '6', name: 'Soft Drinks', price: 3.99, category: 'Beverages' },
-  { id: '7', name: 'French Fries', price: 4.99, category: 'Sides' },
-  { id: '8', name: 'Chocolate Cake', price: 7.99, category: 'Desserts' },
-];
+interface ReceiptData {
+  id: string;
+  itemized_list: {
+    items: Array<{
+      name: string;
+      price: number;
+    }>;
+  };
+}
+
+interface ReceiptItem {
+  name: string;
+  price: number;
+}
 
 export default function Select() {
   return (
@@ -81,15 +84,34 @@ function SelectContent() {
         // Fetch session details
         const { data: sessionData, error: sessionError } = await supabase
           .from('bill_sessions')
-          .select('restaurant_name, total_amount, number_of_participants')
+          .select('restaurant_name, total_amount, number_of_participants, receipt_id')
           .eq('id', sessionId)
           .single();
 
         if (sessionError) throw sessionError;
         if (!sessionData) throw new Error('Session not found');
+        if (!sessionData.receipt_id) throw new Error('Receipt not found');
 
         setSessionData(sessionData);
-        setItems(mockBillItems);
+
+        // Fetch receipt data
+        const { data: receiptData, error: receiptError } = await supabase
+          .from('receipts')
+          .select('itemized_list')
+          .eq('id', sessionData.receipt_id)
+          .single();
+
+        if (receiptError) throw receiptError;
+        if (!receiptData) throw new Error('Receipt data not found');
+
+        // Convert receipt items to BillItems
+        const billItems: BillItem[] = receiptData.itemized_list.items.map((item: ReceiptItem, index: number) => ({
+          id: index.toString(), // Use index as ID since receipt items don't have IDs
+          name: item.name,
+          price: item.price
+        }));
+
+        setItems(billItems);
 
         // Fetch participants
         const { data: participantsData, error: participantsError } = await supabase
@@ -274,9 +296,6 @@ function SelectContent() {
                         <h3 className="font-medium text-inherit">
                           {item.name}
                         </h3>
-                        <p className="text-sm text-blue-100">
-                          {item.category}
-                        </p>
                       </div>
                       <span className="font-medium text-inherit">
                         ${item.price.toFixed(2)}
@@ -302,9 +321,6 @@ function SelectContent() {
                           <h3 className="font-medium text-inherit">
                             {item.name}
                           </h3>
-                          <p className="text-sm text-gray-400">
-                            {item.category}
-                          </p>
                         </div>
                         <span className="font-medium text-inherit">
                           ${item.price.toFixed(2)}
@@ -338,9 +354,6 @@ function SelectContent() {
                       <h3 className="font-medium text-inherit">
                         {item.name}
                       </h3>
-                      <p className={`text-sm ${isSelected ? 'text-blue-100' : 'text-gray-500'}`}>
-                        {item.category}
-                      </p>
                     </div>
                     <span className="font-medium text-inherit">
                       ${item.price.toFixed(2)}

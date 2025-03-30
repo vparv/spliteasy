@@ -10,7 +10,12 @@ interface BillItem {
   id: string;
   name: string;
   price: number;
-  category: string;
+}
+
+interface ItemSelection {
+  item_id: string;
+  participant_id: string;
+  percentage: number;
 }
 
 interface SessionData {
@@ -21,6 +26,7 @@ interface SessionData {
   subtotal: number;
   tax_amount: number;
   tip_amount: number;
+  receipt_id: string;
 }
 
 interface Participant {
@@ -28,6 +34,11 @@ interface Participant {
   name: string;
   is_owner: boolean;
   amount?: number;
+  items?: {
+    name: string;
+    price: number;
+    percentage: number;
+  }[];
 }
 
 export default function Pay() {
@@ -67,14 +78,35 @@ function PayContent() {
         // Fetch session details
         const { data: sessionData, error: sessionError } = await supabase
           .from('bill_sessions')
-          .select('restaurant_name, total_amount, split_type, number_of_participants, subtotal, tax_amount, tip_amount')
+          .select('restaurant_name, total_amount, split_type, number_of_participants, subtotal, tax_amount, tip_amount, receipt_id')
           .eq('id', sessionId)
           .single();
 
         if (sessionError) throw sessionError;
         if (!sessionData) throw new Error('Session not found');
+        if (!sessionData.receipt_id) throw new Error('Receipt not found');
 
         setSessionData(sessionData);
+
+        // Fetch receipt data
+        const { data: receiptData, error: receiptError } = await supabase
+          .from('receipts')
+          .select('itemized_list')
+          .eq('id', sessionData.receipt_id)
+          .single();
+
+        if (receiptError) throw receiptError;
+        if (!receiptData) throw new Error('Receipt data not found');
+
+        // Convert receipt items to BillItems
+        const billItems: Record<string, BillItem> = {};
+        receiptData.itemized_list.items.forEach((item: { name: string; price: number }, index: number) => {
+          billItems[index.toString()] = {
+            id: index.toString(),
+            name: item.name,
+            price: item.price
+          };
+        });
 
         // Fetch current participant
         const { data: participantData, error: participantError } = await supabase
@@ -93,30 +125,45 @@ function PayContent() {
           setCurrentParticipant({ ...participantData, amount });
         } else {
           // For custom split, fetch selections and calculate
-          const { data: selectionsData, error: selectionsError } = await supabase
+          const { data: allSelectionsData, error: selectionsError } = await supabase
             .from('item_selections')
-            .select('item_id, percentage')
-            .eq('participant_id', participantId);
+            .select('item_id, participant_id, percentage')
+            .eq('session_id', sessionId);
 
           if (selectionsError) throw selectionsError;
 
-          // Mock items (replace with real items later)
-          const mockItems: Record<string, BillItem> = {
-            '1': { id: '1', name: 'Chicken Pasta', price: 16.99, category: 'Mains' },
-            '2': { id: '2', name: 'Caesar Salad', price: 12.99, category: 'Starters' },
-            '3': { id: '3', name: 'Garlic Bread', price: 5.99, category: 'Sides' },
-            '4': { id: '4', name: 'Margherita Pizza', price: 18.99, category: 'Mains' },
-            '5': { id: '5', name: 'Tiramisu', price: 8.99, category: 'Desserts' },
-            '6': { id: '6', name: 'Soft Drinks', price: 3.99, category: 'Beverages' },
-            '7': { id: '7', name: 'French Fries', price: 4.99, category: 'Sides' },
-            '8': { id: '8', name: 'Chocolate Cake', price: 7.99, category: 'Desserts' },
-          };
+          // Group selections by item to calculate percentages
+          const itemSelections: Record<string, { total: number, selections: ItemSelection[] }> = {};
+          allSelectionsData.forEach(selection => {
+            if (!itemSelections[selection.item_id]) {
+              itemSelections[selection.item_id] = { total: 0, selections: [] };
+            }
+            itemSelections[selection.item_id].total += selection.percentage;
+            itemSelections[selection.item_id].selections.push(selection);
+          });
 
-          const subtotalAmount = selectionsData.reduce((sum, selection) => {
-            const item = mockItems[selection.item_id];
-            return sum + (item.price * selection.percentage) / 100;
-          }, 0);
+          // Get current participant's selections
+          const participantSelections = allSelectionsData.filter(s => s.participant_id === participantId);
 
+          const items = participantSelections.map(selection => {
+            const item = billItems[selection.item_id];
+            if (!item) {
+              console.error(`Item not found for ID: ${selection.item_id}`);
+              return null;
+            }
+            // Calculate the actual percentage based on total percentages for this item
+            const totalPercentage = itemSelections[selection.item_id].total;
+            const adjustedPercentage = (selection.percentage / totalPercentage) * 100;
+            const itemPrice = item.price * (adjustedPercentage / 100);
+            
+            return {
+              name: item.name,
+              price: itemPrice,
+              percentage: adjustedPercentage
+            };
+          }).filter((item): item is NonNullable<typeof item> => item !== null);
+
+          const subtotalAmount = items.reduce((sum, item) => sum + item.price, 0);
           const taxRatio = sessionData.tax_amount / sessionData.subtotal;
           const tipRatio = sessionData.tip_amount / sessionData.subtotal;
           const taxAmount = subtotalAmount * taxRatio;
@@ -124,7 +171,7 @@ function PayContent() {
           const totalAmount = subtotalAmount + taxAmount + tipAmount;
 
           setAmount(totalAmount);
-          setCurrentParticipant({ ...participantData, amount: totalAmount });
+          setCurrentParticipant({ ...participantData, amount: totalAmount, items });
         }
       } catch (error) {
         console.error('Error fetching data:', error);
