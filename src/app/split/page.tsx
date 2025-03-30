@@ -174,7 +174,7 @@ function SplitContent() {
                   value={splitData.name}
                   onChange={(e) => setSplitData(prev => ({ ...prev, name: e.target.value }))}
                   placeholder="Enter your name"
-                  className="w-full px-4 py-2 border-2 border-gray-200 rounded-xl focus:border-blue-500 focus:outline-none transition-colors"
+                  className="w-full px-4 py-2 border-2 text-black border-gray-200 rounded-xl focus:border-blue-500 focus:outline-none transition-colors"
                 />
               </div>
               <div>
@@ -188,7 +188,7 @@ function SplitContent() {
                     value={splitData.venmoUsername}
                     onChange={(e) => setSplitData(prev => ({ ...prev, venmoUsername: e.target.value }))}
                     placeholder="your_venmo_username"
-                    className="w-full pl-8 pr-4 py-2 border-2 border-gray-200 rounded-xl focus:border-blue-500 focus:outline-none transition-colors"
+                    className="w-full pl-8 pr-4 py-2 text-blackborder-2 border-gray-200 rounded-xl focus:border-blue-500 focus:outline-none transition-colors"
                   />
                 </div>
               </div>
