@@ -71,7 +71,7 @@ function SummaryContent() {
   const [currentParticipant, setCurrentParticipant] = useState<Participant | null>(null);
 
   useEffect(() => {
-    if (!sessionId || !participantId) {
+    if (!sessionId) {
       router.push('/');
       return;
     }
@@ -185,7 +185,12 @@ function SummaryContent() {
         });
 
         setParticipants(enrichedParticipants);
-        setCurrentParticipant(enrichedParticipants.find(p => p.id === participantId) || null);
+        // Set current participant if participantId is provided, otherwise use first participant
+        setCurrentParticipant(
+          participantId
+            ? enrichedParticipants.find(p => p.id === participantId) || enrichedParticipants[0] || null
+            : enrichedParticipants[0] || null
+        );
 
       } catch (error) {
         console.error('Error fetching data:', error);
@@ -198,7 +203,7 @@ function SummaryContent() {
     fetchData();
   }, [sessionId, participantId, router]);
 
-  if (isLoading || !sessionData || !currentParticipant) {
+  if (isLoading || !sessionData || participants.length === 0) {
     return (
       <div className="min-h-screen bg-white flex items-center justify-center">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500" />
@@ -264,11 +269,11 @@ function SummaryContent() {
               : subtotalAmount * (sessionData.tip_amount / sessionData.subtotal);
 
             return (
-              <div 
-                key={participant.id} 
+              <div
+                key={participant.id}
                 className={`bg-white border-2 rounded-xl p-4 space-y-3
-                  ${participant.id === currentParticipant.id 
-                    ? 'border-blue-500 bg-blue-50' 
+                  ${participantId && participant.id === currentParticipant?.id
+                    ? 'border-blue-500 bg-blue-50'
                     : 'border-gray-200'}`}
               >
                 <div className="flex justify-between items-center">
@@ -281,7 +286,7 @@ function SummaryContent() {
                         Owner
                       </span>
                     )}
-                    {participant.id === currentParticipant.id && (
+                    {participantId && participant.id === currentParticipant?.id && (
                       <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">
                         You
                       </span>
@@ -329,19 +334,48 @@ function SummaryContent() {
 
         {/* Navigation */}
         <div className="flex w-full space-x-4">
-          <Link 
-            href={`/select?session=${sessionId}&participant=${participantId}`}
+          <Link
+            href={participantId ? `/select?session=${sessionId}&participant=${participantId}` : `/solo-split?session=${sessionId}`}
             className="w-1/2 py-4 px-6 border-2 border-blue-600 text-blue-600 rounded-2xl transition-all duration-300 font-medium text-center text-lg hover:bg-blue-50"
           >
             Back
           </Link>
-          <Link 
-            href={`/pay?session=${sessionId}&participant=${participantId}`}
-            className="w-1/2 py-4 px-6 bg-blue-500 text-white rounded-2xl transition-all duration-300 font-medium text-lg text-center hover:bg-blue-600"
-          >
-            Pay Now
-          </Link>
+          {participantId ? (
+            <Link
+              href={`/pay?session=${sessionId}&participant=${participantId}`}
+              className="w-1/2 py-4 px-6 bg-blue-500 text-white rounded-2xl transition-all duration-300 font-medium text-lg text-center hover:bg-blue-600"
+            >
+              Pay Now
+            </Link>
+          ) : (
+            <button
+              onClick={() => {
+                // Share functionality or copy link
+                if (navigator.share) {
+                  navigator.share({
+                    title: `Bill Split - ${sessionData.restaurant_name}`,
+                    text: `Check out our bill split from ${sessionData.restaurant_name}`,
+                    url: window.location.href,
+                  });
+                } else {
+                  navigator.clipboard.writeText(window.location.href);
+                  alert('Link copied to clipboard!');
+                }
+              }}
+              className="w-1/2 py-4 px-6 bg-blue-500 text-white rounded-2xl transition-all duration-300 font-medium text-lg text-center hover:bg-blue-600"
+            >
+              Share
+            </button>
+          )}
         </div>
+
+        {/* New Session Button */}
+        <Link
+          href="/upload"
+          className="w-full py-4 px-6 bg-green-500 text-white rounded-2xl transition-all duration-300 font-medium text-lg text-center hover:bg-green-600"
+        >
+          New Session
+        </Link>
       </div>
     </div>
   );
