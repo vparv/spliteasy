@@ -27,6 +27,7 @@ interface Participant {
     price: number;
     percentage: number;
   }[];
+  unselectedShare?: number;
 }
 
 interface SessionData {
@@ -69,6 +70,7 @@ function SummaryContent() {
   const [sessionData, setSessionData] = useState<SessionData | null>(null);
   const [participants, setParticipants] = useState<Participant[]>([]);
   const [currentParticipant, setCurrentParticipant] = useState<Participant | null>(null);
+  const [unselectedItems, setUnselectedItems] = useState<{ name: string; price: number }[]>([]);
 
   useEffect(() => {
     if (!sessionId) {
@@ -140,6 +142,14 @@ function SummaryContent() {
           itemSelections[selection.item_id].selections.push(selection);
         });
 
+        // Find unselected items (items not selected by anyone)
+        const unselected = Object.values(billItems).filter(item => !itemSelections[item.id]);
+        setUnselectedItems(unselected.map(item => ({ name: item.name, price: item.price })));
+
+        // Calculate total cost of unselected items to split evenly
+        const unselectedTotal = unselected.reduce((sum, item) => sum + item.price, 0);
+        const unselectedPerPerson = unselectedTotal / participantsData.length;
+
         // Calculate amounts for each participant
         const enrichedParticipants = participantsData.map(participant => {
           const participantSelections = selectionsData.filter(s => s.participant_id === participant.id);
@@ -148,7 +158,8 @@ function SummaryContent() {
             return {
               ...participant,
               amount: sessionData.total_amount / participantsData.length,
-              items: []
+              items: [],
+              unselectedShare: 0
             };
           } else {
             const items = participantSelections.map(selection => {
@@ -169,7 +180,9 @@ function SummaryContent() {
               };
             }).filter((item): item is NonNullable<typeof item> => item !== null);
 
-            const subtotalAmount = items.reduce((sum, item) => sum + item.price, 0);
+            const selectedSubtotal = items.reduce((sum, item) => sum + item.price, 0);
+            // Add unselected items share to the subtotal
+            const subtotalAmount = selectedSubtotal + unselectedPerPerson;
             const taxRatio = sessionData.tax_amount / sessionData.subtotal;
             const tipRatio = sessionData.tip_amount / sessionData.subtotal;
             const taxAmount = subtotalAmount * taxRatio;
@@ -179,7 +192,8 @@ function SummaryContent() {
             return {
               ...participant,
               amount: totalAmount,
-              items
+              items,
+              unselectedShare: unselectedPerPerson
             };
           }
         });
@@ -250,20 +264,49 @@ function SummaryContent() {
           </div>
         </div>
 
+        {/* Unselected Items Notice */}
+        {sessionData.split_type === 'custom' && unselectedItems.length > 0 && (
+          <div className="w-full bg-amber-50 border border-amber-200 p-4 rounded-xl space-y-3">
+            <div className="flex items-center space-x-2">
+              <span className="text-amber-600 text-lg">&#9432;</span>
+              <span className="font-medium text-amber-800">Items Split Evenly</span>
+            </div>
+            <p className="text-sm text-amber-700">
+              The following items were not selected by anyone and have been split evenly among all {participants.length} participants:
+            </p>
+            <div className="space-y-1">
+              {unselectedItems.map((item, index) => (
+                <div key={index} className="flex justify-between items-center text-sm">
+                  <span className="text-amber-700">{item.name}</span>
+                  <span className="text-amber-800 font-medium">${item.price.toFixed(2)}</span>
+                </div>
+              ))}
+            </div>
+            <div className="pt-2 border-t border-amber-200 flex justify-between items-center text-sm">
+              <span className="text-amber-700 font-medium">Per person share:</span>
+              <span className="text-amber-800 font-bold">
+                ${(unselectedItems.reduce((sum, item) => sum + item.price, 0) / participants.length).toFixed(2)}
+              </span>
+            </div>
+          </div>
+        )}
+
         {/* Individual Splits */}
         <div className="w-full space-y-4">
           <h2 className="text-lg font-semibold text-gray-800">Split Details</h2>
           
           {participants.map((participant) => {
             // Calculate individual breakdowns
-            const subtotalAmount = sessionData.split_type === 'equal' 
+            const selectedItemsTotal = participant.items?.reduce((sum, item) => sum + item.price, 0) || 0;
+            const unselectedShare = participant.unselectedShare || 0;
+            const subtotalAmount = sessionData.split_type === 'equal'
               ? sessionData.subtotal / participants.length
-              : (participant.items?.reduce((sum, item) => sum + item.price, 0) || 0);
-            
+              : selectedItemsTotal + unselectedShare;
+
             const taxAmount = sessionData.split_type === 'equal'
               ? sessionData.tax_amount / participants.length
               : subtotalAmount * (sessionData.tax_amount / sessionData.subtotal);
-            
+
             const tipAmount = sessionData.split_type === 'equal'
               ? sessionData.tip_amount / participants.length
               : subtotalAmount * (sessionData.tip_amount / sessionData.subtotal);
@@ -312,19 +355,29 @@ function SummaryContent() {
                   </div>
                 </div>
                 
-                {sessionData.split_type === 'custom' && participant.items && participant.items.length > 0 && (
+                {sessionData.split_type === 'custom' && (participant.items && participant.items.length > 0 || unselectedShare > 0) && (
                   <div className="space-y-2">
                     <div className="h-px bg-gray-200"></div>
-                    <div className="text-sm font-medium text-gray-700">Items:</div>
-                    {participant.items.map((item, itemIndex) => (
-                      <div key={itemIndex} className="flex justify-between items-center text-sm">
-                        <span className="text-gray-600">{item.name}</span>
-                        <div className="flex items-center space-x-2">
-                          <span className="text-gray-400">({item.percentage.toFixed(1)}%)</span>
-                          <span className="text-gray-900">${item.price.toFixed(2)}</span>
-                        </div>
+                    {participant.items && participant.items.length > 0 && (
+                      <>
+                        <div className="text-sm font-medium text-gray-700">Items:</div>
+                        {participant.items.map((item, itemIndex) => (
+                          <div key={itemIndex} className="flex justify-between items-center text-sm">
+                            <span className="text-gray-600">{item.name}</span>
+                            <div className="flex items-center space-x-2">
+                              <span className="text-gray-400">({item.percentage.toFixed(1)}%)</span>
+                              <span className="text-gray-900">${item.price.toFixed(2)}</span>
+                            </div>
+                          </div>
+                        ))}
+                      </>
+                    )}
+                    {unselectedShare > 0 && (
+                      <div className="flex justify-between items-center text-sm bg-amber-50 p-2 rounded-lg -mx-2">
+                        <span className="text-amber-700">Shared items (split evenly)</span>
+                        <span className="text-amber-800 font-medium">${unselectedShare.toFixed(2)}</span>
                       </div>
-                    ))}
+                    )}
                   </div>
                 )}
               </div>
