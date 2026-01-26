@@ -442,10 +442,28 @@ function SoloSplitContent() {
               </button>
             )}
           </div>
+
+          {/* Edit selections button */}
+          {participants.length > 0 && (
+            <button
+              onClick={() => {
+                setCurrentName('');
+                setCurrentParticipantId(null);
+                setSelectedItems(new Set());
+                setIsEnteringName(false);
+              }}
+              className="w-full py-3 px-4 border-2 border-amber-400 text-amber-600 rounded-xl transition-all font-medium text-center hover:bg-amber-50"
+            >
+              Edit Selections
+            </button>
+          )}
         </div>
       </div>
     );
   }
+
+  // Check if we're in edit mode (no current participant)
+  const isEditMode = !currentParticipantId;
 
   // Item selection screen
   return (
@@ -454,9 +472,11 @@ function SoloSplitContent() {
         {/* Header */}
         <div className="text-center space-y-1">
           <h1 className="text-3xl font-bold tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-blue-600 to-purple-600">
-            {currentName}'s Items
+            {isEditMode ? 'Edit Selections' : `${currentName}'s Items`}
           </h1>
-          <p className="text-sm text-gray-500">Tap items you ordered</p>
+          <p className="text-sm text-gray-500">
+            {isEditMode ? 'Add or remove people from items' : 'Tap items you ordered'}
+          </p>
         </div>
 
         {/* Items List */}
@@ -464,29 +484,34 @@ function SoloSplitContent() {
           {items.map((item, index) => {
             const itemSelections = getItemSelections(index);
             const isSelected = isItemSelectedByMe(index);
-            const othersSelected = itemSelections.filter(s => s.participant_id !== currentParticipantId);
+            // In edit mode, show all selections; otherwise filter out current user
+            const displayedSelections = isEditMode
+              ? itemSelections
+              : itemSelections.filter(s => s.participant_id !== currentParticipantId);
 
             return (
               <div
                 key={index}
                 className={`rounded-xl border-2 p-3 transition-all ${
-                  isSelected
+                  !isEditMode && isSelected
                     ? 'border-blue-500 bg-blue-50'
-                    : 'border-gray-200 hover:border-gray-300'
+                    : itemSelections.length > 0
+                      ? 'border-green-200 bg-green-50'
+                      : 'border-gray-200 hover:border-gray-300'
                 }`}
               >
                 <div
-                  className="flex items-center justify-between cursor-pointer"
-                  onClick={() => toggleItem(index)}
+                  className={`flex items-center justify-between ${!isEditMode ? 'cursor-pointer' : ''}`}
+                  onClick={() => !isEditMode && toggleItem(index)}
                 >
                   <div className="flex-1 min-w-0">
-                    <h3 className={`font-medium truncate ${isSelected ? 'text-blue-900' : 'text-gray-900'}`}>
+                    <h3 className={`font-medium truncate ${!isEditMode && isSelected ? 'text-blue-900' : 'text-gray-900'}`}>
                       {item.name}
                     </h3>
-                    {/* Show who else selected this */}
-                    {othersSelected.length > 0 && (
+                    {/* Show who selected this */}
+                    {displayedSelections.length > 0 && (
                       <div className="flex flex-wrap gap-1 mt-1">
-                        {othersSelected.map((sel, i) => (
+                        {displayedSelections.map((sel, i) => (
                           <span
                             key={i}
                             className="inline-flex items-center px-2 py-0.5 bg-gray-100 text-gray-600 rounded text-xs"
@@ -507,25 +532,28 @@ function SoloSplitContent() {
                     )}
                   </div>
                   <div className="flex items-center gap-2">
-                    <span className={`font-medium ${isSelected ? 'text-blue-700' : 'text-gray-700'}`}>
+                    <span className={`font-medium ${!isEditMode && isSelected ? 'text-blue-700' : 'text-gray-700'}`}>
                       ${item.price.toFixed(2)}
                     </span>
-                    <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center ${
-                      isSelected
-                        ? 'border-blue-500 bg-blue-500 text-white'
-                        : 'border-gray-300'
-                    }`}>
-                      {isSelected && (
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                        </svg>
-                      )}
-                    </div>
+                    {/* Only show checkbox in non-edit mode */}
+                    {!isEditMode && (
+                      <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center ${
+                        isSelected
+                          ? 'border-blue-500 bg-blue-500 text-white'
+                          : 'border-gray-300'
+                      }`}>
+                        {isSelected && (
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                          </svg>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
 
-                {/* Add existing participant dropdown */}
-                {participants.length > 1 && !isSelected && (
+                {/* Add existing participant dropdown - show for all items in edit mode, or when not selected in normal mode */}
+                {participants.length > 0 && (isEditMode || !isSelected) && (
                   <div className="mt-2 pt-2 border-t border-gray-100">
                     <select
                       className="text-xs text-gray-500 bg-transparent cursor-pointer"
@@ -537,7 +565,7 @@ function SoloSplitContent() {
                         }
                       }}
                     >
-                      <option value="">+ Add someone else</option>
+                      <option value="">+ Add someone</option>
                       {participants
                         .filter(p => !itemSelections.some(s => s.participant_id === p.id))
                         .map(p => (
@@ -552,69 +580,105 @@ function SoloSplitContent() {
           })}
         </div>
 
-        {/* Summary */}
-        <div className="bg-gray-50 rounded-xl p-4 space-y-2">
-          <div className="flex justify-between text-sm text-gray-600">
-            <span>Your items ({selectedItems.size})</span>
-            <span>${calculateSelectedSubtotal().toFixed(2)}</span>
-          </div>
-          {calculateProportionalShare().fees > 0 && (
-            <div className="flex justify-between text-sm text-amber-600">
-              <span>+ Fees</span>
-              <span>${calculateProportionalShare().fees.toFixed(2)}</span>
-            </div>
-          )}
-          {calculateProportionalShare().tax > 0 && (
+        {/* Summary - only show in non-edit mode */}
+        {!isEditMode && (
+          <div className="bg-gray-50 rounded-xl p-4 space-y-2">
             <div className="flex justify-between text-sm text-gray-600">
-              <span>+ Tax</span>
-              <span>${calculateProportionalShare().tax.toFixed(2)}</span>
+              <span>Your items ({selectedItems.size})</span>
+              <span>${calculateSelectedSubtotal().toFixed(2)}</span>
             </div>
-          )}
-          {calculateProportionalShare().tip > 0 && (
-            <div className="flex justify-between text-sm text-gray-600">
-              <span>+ Tip</span>
-              <span>${calculateProportionalShare().tip.toFixed(2)}</span>
+            {calculateProportionalShare().fees > 0 && (
+              <div className="flex justify-between text-sm text-amber-600">
+                <span>+ Fees</span>
+                <span>${calculateProportionalShare().fees.toFixed(2)}</span>
+              </div>
+            )}
+            {calculateProportionalShare().tax > 0 && (
+              <div className="flex justify-between text-sm text-gray-600">
+                <span>+ Tax</span>
+                <span>${calculateProportionalShare().tax.toFixed(2)}</span>
+              </div>
+            )}
+            {calculateProportionalShare().tip > 0 && (
+              <div className="flex justify-between text-sm text-gray-600">
+                <span>+ Tip</span>
+                <span>${calculateProportionalShare().tip.toFixed(2)}</span>
+              </div>
+            )}
+            <div className="flex justify-between font-semibold text-gray-900 pt-2 border-t border-gray-200">
+              <span>Your total</span>
+              <span className="text-blue-600">${calculateProportionalShare().total.toFixed(2)}</span>
             </div>
-          )}
-          <div className="flex justify-between font-semibold text-gray-900 pt-2 border-t border-gray-200">
-            <span>Your total</span>
-            <span className="text-blue-600">${calculateProportionalShare().total.toFixed(2)}</span>
           </div>
-        </div>
+        )}
+
+        {/* Edit mode info */}
+        {isEditMode && (
+          <div className="bg-amber-50 rounded-xl p-4 space-y-2">
+            <p className="text-sm text-amber-700 font-medium">Edit Mode</p>
+            <p className="text-xs text-amber-600">
+              Use the dropdown on each item to add people, or click the × to remove someone from an item.
+            </p>
+          </div>
+        )}
 
         {error && (
           <div className="text-red-500 text-sm text-center">{error}</div>
         )}
 
         {/* Actions */}
-        <div className="flex gap-3 pt-2">
-          <button
-            onClick={() => {
-              setIsEnteringName(true);
-              setCurrentName('');
-              setSelectedItems(new Set());
-              setCurrentParticipantId(null);
-            }}
-            className="flex-1 py-4 px-4 border-2 border-gray-300 text-gray-600 rounded-2xl transition-all font-medium hover:bg-gray-50"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={saveAndContinue}
-            disabled={isSaving}
-            className={`flex-1 py-4 px-4 bg-blue-500 text-white rounded-2xl transition-all font-medium hover:bg-blue-600 ${isSaving ? 'opacity-50' : ''}`}
-          >
-            {isSaving ? 'Saving...' : 'Done, Next Person'}
-          </button>
-        </div>
+        {isEditMode ? (
+          <div className="flex gap-3 pt-2">
+            <button
+              onClick={() => {
+                setIsEnteringName(true);
+                setCurrentName('');
+                setSelectedItems(new Set());
+                setCurrentParticipantId(null);
+              }}
+              className="flex-1 py-4 px-4 border-2 border-gray-300 text-gray-600 rounded-2xl transition-all font-medium hover:bg-gray-50"
+            >
+              Back
+            </button>
+            <button
+              onClick={finishAndViewSummary}
+              className="flex-1 py-4 px-4 bg-green-500 text-white rounded-2xl transition-all font-medium hover:bg-green-600"
+            >
+              View Summary
+            </button>
+          </div>
+        ) : (
+          <>
+            <div className="flex gap-3 pt-2">
+              <button
+                onClick={() => {
+                  setIsEnteringName(true);
+                  setCurrentName('');
+                  setSelectedItems(new Set());
+                  setCurrentParticipantId(null);
+                }}
+                className="flex-1 py-4 px-4 border-2 border-gray-300 text-gray-600 rounded-2xl transition-all font-medium hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={saveAndContinue}
+                disabled={isSaving}
+                className={`flex-1 py-4 px-4 bg-blue-500 text-white rounded-2xl transition-all font-medium hover:bg-blue-600 ${isSaving ? 'opacity-50' : ''}`}
+              >
+                {isSaving ? 'Saving...' : 'Done, Next Person'}
+              </button>
+            </div>
 
-        <button
-          onClick={finishAndViewSummary}
-          disabled={isSaving}
-          className="w-full py-3 px-4 bg-green-500 text-white rounded-xl transition-all font-medium hover:bg-green-600"
-        >
-          Everyone's Done - View Summary
-        </button>
+            <button
+              onClick={finishAndViewSummary}
+              disabled={isSaving}
+              className="w-full py-3 px-4 bg-green-500 text-white rounded-xl transition-all font-medium hover:bg-green-600"
+            >
+              Everyone's Done - View Summary
+            </button>
+          </>
+        )}
       </div>
     </div>
   );
