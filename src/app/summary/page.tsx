@@ -41,6 +41,11 @@ interface SessionData {
   receipt_id: string;
 }
 
+interface Fee {
+  name: string;
+  amount: number;
+}
+
 interface ReceiptData {
   id: string;
   itemized_list: {
@@ -48,6 +53,7 @@ interface ReceiptData {
       name: string;
       price: number;
     }>;
+    fees?: Fee[];
   };
 }
 
@@ -71,6 +77,7 @@ function SummaryContent() {
   const [participants, setParticipants] = useState<Participant[]>([]);
   const [currentParticipant, setCurrentParticipant] = useState<Participant | null>(null);
   const [unselectedItems, setUnselectedItems] = useState<{ name: string; price: number }[]>([]);
+  const [fees, setFees] = useState<Fee[]>([]);
 
   useEffect(() => {
     if (!sessionId) {
@@ -116,6 +123,19 @@ function SummaryContent() {
           };
         });
 
+        // Extract fees from receipt (excluding tips which are handled separately)
+        const receiptFees: Fee[] = [];
+        if (receiptData.itemized_list.fees && Array.isArray(receiptData.itemized_list.fees)) {
+          receiptData.itemized_list.fees.forEach((fee: Fee) => {
+            const feeName = fee.name.toLowerCase();
+            // Exclude tips/gratuity as they're already in tip_amount
+            if (!feeName.includes('tip') && !feeName.includes('gratuity')) {
+              receiptFees.push(fee);
+            }
+          });
+        }
+        setFees(receiptFees);
+
         // Fetch all participants
         const { data: participantsData, error: participantsError } = await supabase
           .from('bill_participants')
@@ -146,14 +166,23 @@ function SummaryContent() {
         const unselected = Object.values(billItems).filter(item => !itemSelections[item.id]);
         setUnselectedItems(unselected.map(item => ({ name: item.name, price: item.price })));
 
+        // Calculate the total from all receipt items
+        const receiptItemsTotal = Object.values(billItems).reduce((sum, item) => sum + item.price, 0);
+
+        // Calculate fees total from receipt
+        const receiptFeesTotal = receiptFees.reduce((sum, fee) => sum + fee.amount, 0);
+
+        // Items-only subtotal (sessionData.subtotal includes fees, so subtract them)
+        const itemsOnlySubtotal = sessionData.subtotal - receiptFeesTotal;
+
         // Calculate total cost of unselected items to split evenly
         const unselectedTotal = unselected.reduce((sum, item) => sum + item.price, 0);
         const unselectedPerPerson = unselectedTotal / participantsData.length;
 
         // Calculate amounts for each participant
-        const enrichedParticipants = participantsData.map(participant => {
+        const enrichedParticipantsRaw = participantsData.map(participant => {
           const participantSelections = selectionsData.filter(s => s.participant_id === participant.id);
-          
+
           if (sessionData.split_type === 'equal') {
             return {
               ...participant,
@@ -162,6 +191,12 @@ function SummaryContent() {
               unselectedShare: 0
             };
           } else {
+            // Calculate the scaling factor to convert receipt item prices to actual items-only subtotal
+            // This accounts for any discrepancy between receipt items and the bill subtotal (excluding fees)
+            const scalingFactor = receiptItemsTotal > 0
+              ? itemsOnlySubtotal / receiptItemsTotal
+              : 1;
+
             const items = participantSelections.map(selection => {
               const item = billItems[selection.item_id];
               if (!item) {
@@ -171,8 +206,9 @@ function SummaryContent() {
               // Calculate the actual percentage based on total percentages for this item
               const totalPercentage = itemSelections[selection.item_id].total;
               const adjustedPercentage = (selection.percentage / totalPercentage) * 100;
-              const itemPrice = item.price * (adjustedPercentage / 100);
-              
+              // Scale the item price to match the items-only subtotal
+              const itemPrice = item.price * (adjustedPercentage / 100) * scalingFactor;
+
               return {
                 name: item.name,
                 price: itemPrice,
@@ -180,23 +216,55 @@ function SummaryContent() {
               };
             }).filter((item): item is NonNullable<typeof item> => item !== null);
 
-            const selectedSubtotal = items.reduce((sum, item) => sum + item.price, 0);
-            // Add unselected items share to the subtotal
-            const subtotalAmount = selectedSubtotal + unselectedPerPerson;
-            const taxRatio = sessionData.tax_amount / sessionData.subtotal;
-            const tipRatio = sessionData.tip_amount / sessionData.subtotal;
-            const taxAmount = subtotalAmount * taxRatio;
-            const tipAmount = subtotalAmount * tipRatio;
-            const totalAmount = subtotalAmount + taxAmount + tipAmount;
+            // Calculate participant's items subtotal share
+            const selectedItemsTotal = items.reduce((sum, item) => sum + item.price, 0);
+            const scaledUnselectedShare = unselectedPerPerson * scalingFactor;
+            const itemsSubtotalShare = selectedItemsTotal + scaledUnselectedShare;
+
+            // Calculate participant's proportion of items subtotal
+            const itemsProportion = itemsOnlySubtotal > 0
+              ? itemsSubtotalShare / itemsOnlySubtotal
+              : 1 / participantsData.length;
+
+            // Calculate participant's share of fees, tax, and tip based on their proportion
+            const feesShare = receiptFeesTotal * itemsProportion;
+            const taxShare = sessionData.tax_amount * itemsProportion;
+            const tipShare = sessionData.tip_amount * itemsProportion;
+
+            // Total = items + fees + tax + tip
+            const totalAmount = itemsSubtotalShare + feesShare + taxShare + tipShare;
 
             return {
               ...participant,
               amount: totalAmount,
               items,
-              unselectedShare: unselectedPerPerson
+              unselectedShare: scaledUnselectedShare
             };
           }
         });
+
+        // Round amounts and ensure they sum to the total
+        const roundedTotal = Math.round(sessionData.total_amount * 100) / 100;
+        let enrichedParticipants = enrichedParticipantsRaw.map(p => ({
+          ...p,
+          amount: Math.round((p.amount || 0) * 100) / 100
+        }));
+        
+        // Calculate the sum of rounded amounts
+        const sumOfAmounts = enrichedParticipants.reduce((sum, p) => sum + (p.amount || 0), 0);
+        const roundedSum = Math.round(sumOfAmounts * 100) / 100;
+        
+        // If there's a rounding difference, adjust the owner's amount (or first participant)
+        if (roundedSum !== roundedTotal) {
+          const difference = Math.round((roundedTotal - roundedSum) * 100) / 100;
+          const ownerIndex = enrichedParticipants.findIndex(p => p.is_owner);
+          const adjustIndex = ownerIndex >= 0 ? ownerIndex : 0;
+          enrichedParticipants = enrichedParticipants.map((p, index) => 
+            index === adjustIndex 
+              ? { ...p, amount: Math.round(((p.amount || 0) + difference) * 100) / 100 }
+              : p
+          );
+        }
 
         setParticipants(enrichedParticipants);
         // Set current participant if participantId is provided, otherwise use first participant
@@ -235,30 +303,45 @@ function SummaryContent() {
 
         {/* Total Amount Card */}
         <div className="w-full bg-blue-50 p-6 rounded-xl space-y-4">
-          <div className="flex justify-between items-center">
-            <span className="text-lg font-medium text-gray-700">Total Bill</span>
-            <span className="text-3xl font-bold text-blue-600">
-              ${sessionData.total_amount.toFixed(2)}
-            </span>
-          </div>
-          <div className="space-y-2">
-            <div className="flex justify-between items-center text-sm">
-              <span className="text-gray-600">Subtotal</span>
-              <span className="font-medium text-gray-800">${sessionData.subtotal.toFixed(2)}</span>
-            </div>
-            <div className="flex justify-between items-center text-sm">
-              <span className="text-gray-600">
-                Tax ({(sessionData.tax_amount / sessionData.subtotal * 100).toFixed(1)}%)
-              </span>
-              <span className="font-medium text-gray-800">${sessionData.tax_amount.toFixed(2)}</span>
-            </div>
-            <div className="flex justify-between items-center text-sm">
-              <span className="text-gray-600">
-                Tip ({(sessionData.tip_amount / sessionData.subtotal * 100).toFixed(1)}%)
-              </span>
-              <span className="font-medium text-gray-800">${sessionData.tip_amount.toFixed(2)}</span>
-            </div>
-          </div>
+          {(() => {
+            // sessionData.subtotal includes fees, so subtract them to get items-only subtotal
+            const feesTotal = fees.reduce((sum, fee) => sum + fee.amount, 0);
+            const itemsSubtotal = Math.round((sessionData.subtotal - feesTotal) * 100) / 100;
+            const displayedTax = Math.round(sessionData.tax_amount * 100) / 100;
+            const displayedTip = Math.round(sessionData.tip_amount * 100) / 100;
+            const displayedTotal = Math.round(sessionData.total_amount * 100) / 100;
+
+            return (
+              <>
+                <div className="flex justify-between items-center">
+                  <span className="text-lg font-medium text-gray-700">Total Bill</span>
+                  <span className="text-3xl font-bold text-blue-600">
+                    ${displayedTotal.toFixed(2)}
+                  </span>
+                </div>
+                <div className="space-y-2">
+                  <div className="flex justify-between items-center text-sm">
+                    <span className="text-gray-600">Subtotal</span>
+                    <span className="font-medium text-gray-800">${itemsSubtotal.toFixed(2)}</span>
+                  </div>
+                  {fees.map((fee, index) => (
+                    <div key={index} className="flex justify-between items-center text-sm">
+                      <span className="text-gray-600">{fee.name}</span>
+                      <span className="font-medium text-gray-800">${fee.amount.toFixed(2)}</span>
+                    </div>
+                  ))}
+                  <div className="flex justify-between items-center text-sm">
+                    <span className="text-gray-600">Tax</span>
+                    <span className="font-medium text-gray-800">${displayedTax.toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between items-center text-sm">
+                    <span className="text-gray-600">Tip</span>
+                    <span className="font-medium text-gray-800">${displayedTip.toFixed(2)}</span>
+                  </div>
+                </div>
+              </>
+            );
+          })()}
           <div className="text-sm text-gray-500">
             Split {sessionData.split_type === 'equal' ? 'equally' : 'by items'} between {sessionData.number_of_participants} people
           </div>
@@ -296,20 +379,33 @@ function SummaryContent() {
           <h2 className="text-lg font-semibold text-gray-800">Split Details</h2>
           
           {participants.map((participant) => {
-            // Calculate individual breakdowns
+            // Items subtotal = sum of individual items + shared items (already scaled to items-only subtotal)
             const selectedItemsTotal = participant.items?.reduce((sum, item) => sum + item.price, 0) || 0;
             const unselectedShare = participant.unselectedShare || 0;
-            const subtotalAmount = sessionData.split_type === 'equal'
-              ? sessionData.subtotal / participants.length
-              : selectedItemsTotal + unselectedShare;
+            const itemsSubtotalShare = selectedItemsTotal + unselectedShare;
 
-            const taxAmount = sessionData.split_type === 'equal'
-              ? sessionData.tax_amount / participants.length
-              : subtotalAmount * (sessionData.tax_amount / sessionData.subtotal);
+            // Calculate fees total
+            const feesTotal = fees.reduce((sum, fee) => sum + fee.amount, 0);
 
-            const tipAmount = sessionData.split_type === 'equal'
-              ? sessionData.tip_amount / participants.length
-              : subtotalAmount * (sessionData.tip_amount / sessionData.subtotal);
+            // For equal split, calculate proportion differently
+            // For custom split, items are already scaled correctly
+            const itemsOnlySubtotalTotal = sessionData.subtotal - feesTotal;
+            const itemsProportion = sessionData.split_type === 'equal'
+              ? 1 / participants.length
+              : (itemsOnlySubtotalTotal > 0 ? itemsSubtotalShare / itemsOnlySubtotalTotal : 1 / participants.length);
+
+            // Calculate fees, tax, and tip based on proportion
+            const feesShare = Math.round(feesTotal * itemsProportion * 100) / 100;
+            const taxAmount = Math.round(sessionData.tax_amount * itemsProportion * 100) / 100;
+            const tipAmount = Math.round(sessionData.tip_amount * itemsProportion * 100) / 100;
+
+            // Round items subtotal
+            const displayedItemsSubtotal = sessionData.split_type === 'equal'
+              ? Math.round(itemsOnlySubtotalTotal / participants.length * 100) / 100
+              : Math.round(itemsSubtotalShare * 100) / 100;
+
+            // Total for this participant (should equal items subtotal + fees + tax + tip)
+            const displayedTotal = Math.round((participant.amount || 0) * 100) / 100;
 
             return (
               <div
@@ -339,23 +435,29 @@ function SummaryContent() {
                     ${participant.amount?.toFixed(2)}
                   </span>
                 </div>
-                
+
                 <div className="space-y-2">
                   <div className="flex justify-between items-center text-sm">
-                    <span className="text-gray-600">Subtotal Share</span>
-                    <span className="font-medium text-gray-800">${subtotalAmount.toFixed(2)}</span>
+                    <span className="text-gray-600">Subtotal</span>
+                    <span className="font-medium text-gray-800">${displayedItemsSubtotal.toFixed(2)}</span>
                   </div>
+                  {fees.length > 0 && (
+                    <div className="flex justify-between items-center text-sm">
+                      <span className="text-gray-600">Fees</span>
+                      <span className="font-medium text-gray-800">${feesShare.toFixed(2)}</span>
+                    </div>
+                  )}
                   <div className="flex justify-between items-center text-sm">
-                    <span className="text-gray-600">Tax Share</span>
+                    <span className="text-gray-600">Tax</span>
                     <span className="font-medium text-gray-800">${taxAmount.toFixed(2)}</span>
                   </div>
                   <div className="flex justify-between items-center text-sm">
-                    <span className="text-gray-600">Tip Share</span>
+                    <span className="text-gray-600">Tip</span>
                     <span className="font-medium text-gray-800">${tipAmount.toFixed(2)}</span>
                   </div>
                 </div>
                 
-                {sessionData.split_type === 'custom' && (participant.items && participant.items.length > 0 || unselectedShare > 0) && (
+                {sessionData.split_type === 'custom' && (participant.items && participant.items.length > 0 || (participant.unselectedShare || 0) > 0) && (
                   <div className="space-y-2">
                     <div className="h-px bg-gray-200"></div>
                     {participant.items && participant.items.length > 0 && (
@@ -372,10 +474,10 @@ function SummaryContent() {
                         ))}
                       </>
                     )}
-                    {unselectedShare > 0 && (
+                    {(participant.unselectedShare || 0) > 0 && (
                       <div className="flex justify-between items-center text-sm bg-amber-50 p-2 rounded-lg -mx-2">
                         <span className="text-amber-700">Shared items (split evenly)</span>
-                        <span className="text-amber-800 font-medium">${unselectedShare.toFixed(2)}</span>
+                        <span className="text-amber-800 font-medium">${(participant.unselectedShare || 0).toFixed(2)}</span>
                       </div>
                     )}
                   </div>
@@ -383,6 +485,14 @@ function SummaryContent() {
               </div>
             );
           })}
+          
+          {/* Verification: Sum of all amounts */}
+          <div className="mt-4 pt-4 border-t-2 border-gray-200 flex justify-between items-center">
+            <span className="font-medium text-gray-700">Total (all shares)</span>
+            <span className="text-xl font-bold text-green-600">
+              ${participants.reduce((sum, p) => sum + (p.amount || 0), 0).toFixed(2)}
+            </span>
+          </div>
         </div>
 
         {/* Navigation */}

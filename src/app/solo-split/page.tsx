@@ -110,11 +110,13 @@ function SoloSplitContent() {
           item_id: string;
           participant_id: string;
           percentage: number;
-          bill_participants: { name: string } | null;
+          bill_participants: { name: string }[] | { name: string } | null;
         }) => ({
           item_id: sel.item_id,
           participant_id: sel.participant_id,
-          participant_name: sel.bill_participants?.name || 'Unknown',
+          participant_name: Array.isArray(sel.bill_participants)
+            ? sel.bill_participants[0]?.name || 'Unknown'
+            : sel.bill_participants?.name || 'Unknown',
           percentage: sel.percentage,
         }));
         setSelections(formattedSelections);
