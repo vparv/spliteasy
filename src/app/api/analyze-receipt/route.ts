@@ -65,12 +65,82 @@ interface AnalyzeBody {
   fileName?: unknown;
 }
 
+interface CompleteUploadBody {
+  action: 'complete-upload';
+  uploadUrl?: unknown;
+  size?: unknown;
+}
+
 interface GeminiFile {
   name?: string;
   uri?: string;
   mimeType?: string;
   sizeBytes?: string;
   state?: string;
+}
+
+function isGeminiUploadUrl(value: string) {
+  try {
+    const url = new URL(value);
+    return (
+      url.protocol === 'https:' &&
+      url.hostname === 'generativelanguage.googleapis.com' &&
+      url.pathname === '/upload/v1beta/files' &&
+      url.searchParams.get('upload_protocol') === 'resumable' &&
+      Boolean(url.searchParams.get('upload_id'))
+    );
+  } catch {
+    return false;
+  }
+}
+
+async function completeUpload(body: CompleteUploadBody) {
+  if (
+    typeof body.uploadUrl !== 'string' ||
+    !isGeminiUploadUrl(body.uploadUrl) ||
+    typeof body.size !== 'number' ||
+    !Number.isInteger(body.size) ||
+    body.size <= 0 ||
+    body.size > MAX_IMAGE_BYTES
+  ) {
+    return NextResponse.json({ error: 'Invalid receipt upload.' }, { status: 400 });
+  }
+
+  try {
+    const response = await fetch(body.uploadUrl, {
+      method: 'POST',
+      headers: {
+        'X-Goog-Upload-Command': 'query',
+      },
+    });
+
+    if (!response.ok || response.headers.get('x-goog-upload-status') !== 'final') {
+      console.error('Gemini receipt upload confirmation failed:', response.status);
+      return NextResponse.json(
+        { error: 'Failed to upload receipt. Please try again.' },
+        { status: 502 },
+      );
+    }
+
+    const payload = (await response.json()) as {
+      file?: { name?: string; sizeBytes?: string; state?: string };
+    };
+    if (
+      !payload.file?.name ||
+      Number(payload.file.sizeBytes) !== body.size ||
+      payload.file.state !== 'ACTIVE'
+    ) {
+      throw new Error('Gemini upload confirmation was invalid');
+    }
+
+    return NextResponse.json({ file: { name: payload.file.name } });
+  } catch (error) {
+    console.error('Gemini receipt upload confirmation failed:', error);
+    return NextResponse.json(
+      { error: 'Failed to upload receipt. Please try again.' },
+      { status: 502 },
+    );
+  }
 }
 
 async function createUpload(body: CreateUploadBody, apiKey: string) {
@@ -213,16 +283,20 @@ export async function POST(request: Request) {
     );
   }
 
-  let body: CreateUploadBody | AnalyzeBody;
+  let body: CreateUploadBody | CompleteUploadBody | AnalyzeBody;
 
   try {
-    body = (await request.json()) as CreateUploadBody | AnalyzeBody;
+    body = (await request.json()) as CreateUploadBody | CompleteUploadBody | AnalyzeBody;
   } catch {
     return NextResponse.json({ error: 'Invalid request body.' }, { status: 400 });
   }
 
   if (body.action === 'create-upload') {
     return createUpload(body, apiKey);
+  }
+
+  if (body.action === 'complete-upload') {
+    return completeUpload(body);
   }
 
   if (body.action === 'analyze') {

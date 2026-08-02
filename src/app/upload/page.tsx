@@ -276,22 +276,42 @@ export default function Upload() {
       throw new Error(createUploadPayload.error || 'Failed to prepare receipt upload.');
     }
 
-    const uploadResponse = await fetch(createUploadPayload.uploadUrl, {
+    try {
+      await fetch(createUploadPayload.uploadUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': file.type,
+          'X-Goog-Upload-Offset': '0',
+          'X-Goog-Upload-Command': 'upload, finalize',
+        },
+        body: file,
+      });
+    } catch {
+      // Gemini accepts the file but does not expose the finalized response to
+      // browsers. The server confirms completion and reads the file metadata.
+    }
+
+    const completeUploadResponse = await fetch('/api/analyze-receipt', {
       method: 'POST',
       headers: {
-        'Content-Type': file.type,
-        'X-Goog-Upload-Offset': '0',
-        'X-Goog-Upload-Command': 'upload, finalize',
+        'Content-Type': 'application/json',
       },
-      body: file,
+      body: JSON.stringify({
+        action: 'complete-upload',
+        uploadUrl: createUploadPayload.uploadUrl,
+        size: file.size,
+      }),
     });
 
-    const uploadPayload = (await uploadResponse.json().catch(() => ({}))) as {
+    const completeUploadPayload = (await completeUploadResponse.json().catch(() => ({}))) as {
       file?: { name?: string };
+      error?: string;
     };
 
-    if (!uploadResponse.ok || !uploadPayload.file?.name) {
-      throw new Error('Failed to upload receipt. Please try again.');
+    if (!completeUploadResponse.ok || !completeUploadPayload.file?.name) {
+      throw new Error(
+        completeUploadPayload.error || 'Failed to upload receipt. Please try again.',
+      );
     }
 
     const analysisResponse = await fetch('/api/analyze-receipt', {
@@ -301,7 +321,7 @@ export default function Upload() {
       },
       body: JSON.stringify({
         action: 'analyze',
-        fileName: uploadPayload.file.name,
+        fileName: completeUploadPayload.file.name,
       }),
     });
 
