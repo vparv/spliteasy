@@ -4,7 +4,6 @@ import Link from 'next/link';
 import { useRef, useState } from 'react';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
-import { GoogleGenerativeAI } from '@google/generative-ai';
 import { supabase } from '@/lib/supabase';
 
 interface Fee {
@@ -35,7 +34,7 @@ interface RawFee {
   amount: string | number | undefined;
 }
 
-const genAI = new GoogleGenerativeAI(process.env.NEXT_PUBLIC_GEMINI_API_KEY || '');
+const MAX_RECEIPT_IMAGE_BYTES = 3 * 1024 * 1024;
 
 export default function Upload() {
   const [previews, setPreviews] = useState<string[]>([]);
@@ -218,64 +217,31 @@ export default function Upload() {
   };
 
   const analyzeImage = async (imageData: string): Promise<ItemizedList> => {
-    const [mimeInfo, base64Image] = imageData.split(',');
-    const mimeType = mimeInfo.match(/:(.*?);/)?.[1] || 'image/jpeg';
+    const base64Image = imageData.split(',')[1] || '';
+    const imageBytes = Math.floor((base64Image.length * 3) / 4);
 
-    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+    if (imageBytes > MAX_RECEIPT_IMAGE_BYTES) {
+      throw new Error('Each receipt photo must be smaller than 3 MB.');
+    }
 
-    const prompt = `Analyze this receipt image carefully and extract ALL items and charges. Return ONLY a valid JSON object with no additional text, markdown, or code blocks.
-
-IMPORTANT RULES:
-1. Look for quantity indicators like "2x", "x2", "Qty: 2", or a number before/after the item name
-2. If an item has quantity > 1, the "price" should be the TOTAL price for all units (not unit price)
-3. Include ALL items on the receipt, even if they appear similar
-4. Do NOT skip any items or combine them
-5. Extract ALL additional charges into the "fees" array - this includes:
-   - Service fees / Service charge
-   - Delivery fees
-   - Tip / Gratuity (if already added to bill)
-   - Convenience fees
-   - Platform fees
-   - Processing fees
-   - Any other surcharges or additional charges
-6. Tax should go in "tax", NOT in fees
-7. The goal is to capture the ENTIRE bill total
-
-Return this exact JSON structure:
-{
-  "merchant": "store name",
-  "date": "YYYY-MM-DD",
-  "tax": 0.00,
-  "fees": [
-    { "name": "Service Fee", "amount": 0.00 },
-    { "name": "Delivery Fee", "amount": 0.00 }
-  ],
-  "items": [
-    { "name": "item name", "quantity": 1, "price": 0.00 }
-  ]
-}
-
-Rules for values:
-- "price" = total price for that line item (quantity × unit price)
-- "quantity" = number of units (default 1 if not shown)
-- "fees" = array of all additional charges (service fee, delivery fee, tip, etc.)
-- "tax" = sales tax only
-- All amounts must be numbers without currency symbols
-- Date format: YYYY-MM-DD
-- If no fees exist, return an empty fees array: "fees": []`;
-
-    const imagePart = {
-      inlineData: {
-        data: base64Image,
-        mimeType: mimeType,
+    const response = await fetch('/api/analyze-receipt', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
       },
+      body: JSON.stringify({ imageData }),
+    });
+
+    const payload = (await response.json().catch(() => ({}))) as {
+      analysis?: string;
+      error?: string;
     };
 
-    const result = await model.generateContent([prompt, imagePart]);
-    const response = await result.response;
-    const rawAnalysis = response.text();
+    if (!response.ok) {
+      throw new Error(payload.error || 'Failed to analyze receipt.');
+    }
 
-    return parseAnalysis(rawAnalysis);
+    return parseAnalysis(payload.analysis || null);
   };
 
   const handleContinue = async () => {
