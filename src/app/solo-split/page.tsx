@@ -10,11 +10,6 @@ interface ReceiptItem {
   price: number;
 }
 
-interface Fee {
-  name: string;
-  amount: number;
-}
-
 interface ItemSelection {
   item_id: string;
   participant_id: string;
@@ -38,9 +33,6 @@ function SoloSplitContent() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [items, setItems] = useState<ReceiptItem[]>([]);
-  const [fees, setFees] = useState<Fee[]>([]);
-  const [tax, setTax] = useState(0);
-  const [tipAmount, setTipAmount] = useState(0);
   const [restaurantName, setRestaurantName] = useState('');
   const [selections, setSelections] = useState<ItemSelection[]>([]);
   const [participants, setParticipants] = useState<{ id: string; name: string }[]>([]);
@@ -74,20 +66,10 @@ function SoloSplitContent() {
         if (!session) throw new Error('Session not found');
 
         setRestaurantName(session.restaurant_name || '');
-        setTax(session.tax_amount || 0);
-        setTipAmount(session.tip_amount || 0);
 
         // Get items from receipt
         const receiptItems = session.receipts?.itemized_list?.items || [];
         setItems(receiptItems);
-
-        // Get fees (non-tip fees)
-        const receiptFees = session.receipts?.itemized_list?.fees || [];
-        const nonTipFees = receiptFees.filter((fee: Fee) => {
-          const name = fee.name.toLowerCase();
-          return !name.includes('tip') && !name.includes('gratuity');
-        });
-        setFees(nonTipFees);
 
         // Fetch existing participants
         const { data: existingParticipants, error: participantsError } = await supabase
@@ -322,36 +304,6 @@ function SoloSplitContent() {
     router.push(`/summary?session=${sessionId}`);
   };
 
-  // Calculate subtotal of selected items
-  const calculateSelectedSubtotal = () => {
-    return Array.from(selectedItems).reduce((sum, index) => sum + (items[index]?.price || 0), 0);
-  };
-
-  // Calculate total items subtotal (for ratio calculations)
-  const totalItemsSubtotal = items.reduce((sum, item) => sum + item.price, 0);
-
-  // Calculate fees total
-  const feesTotal = fees.reduce((sum, fee) => sum + fee.amount, 0);
-
-  // Calculate proportional share of fees, tax, and tip
-  const calculateProportionalShare = () => {
-    const selectedSubtotal = calculateSelectedSubtotal();
-    if (totalItemsSubtotal === 0) return { fees: 0, tax: 0, tip: 0, total: 0 };
-
-    const ratio = selectedSubtotal / totalItemsSubtotal;
-    const proportionalFees = feesTotal * ratio;
-    const proportionalTax = tax * ratio;
-    const proportionalTip = tipAmount * ratio;
-    const total = selectedSubtotal + proportionalFees + proportionalTax + proportionalTip;
-
-    return {
-      fees: proportionalFees,
-      tax: proportionalTax,
-      tip: proportionalTip,
-      total,
-    };
-  };
-
   if (isLoading) {
     return (
       <div className="min-h-screen bg-white flex items-center justify-center">
@@ -580,35 +532,15 @@ function SoloSplitContent() {
           })}
         </div>
 
-        {/* Summary - only show in non-edit mode */}
+        {/* Selection status - exact prices are calculated after everyone finishes */}
         {!isEditMode && (
-          <div className="bg-gray-50 rounded-xl p-4 space-y-2">
-            <div className="flex justify-between text-sm text-gray-600">
-              <span>Your items ({selectedItems.size})</span>
-              <span>${calculateSelectedSubtotal().toFixed(2)}</span>
-            </div>
-            {calculateProportionalShare().fees > 0 && (
-              <div className="flex justify-between text-sm text-amber-600">
-                <span>+ Fees</span>
-                <span>${calculateProportionalShare().fees.toFixed(2)}</span>
-              </div>
-            )}
-            {calculateProportionalShare().tax > 0 && (
-              <div className="flex justify-between text-sm text-gray-600">
-                <span>+ Tax</span>
-                <span>${calculateProportionalShare().tax.toFixed(2)}</span>
-              </div>
-            )}
-            {calculateProportionalShare().tip > 0 && (
-              <div className="flex justify-between text-sm text-gray-600">
-                <span>+ Tip</span>
-                <span>${calculateProportionalShare().tip.toFixed(2)}</span>
-              </div>
-            )}
-            <div className="flex justify-between font-semibold text-gray-900 pt-2 border-t border-gray-200">
-              <span>Your total</span>
-              <span className="text-blue-600">${calculateProportionalShare().total.toFixed(2)}</span>
-            </div>
+          <div className="rounded-xl border border-blue-100 bg-blue-50/70 px-4 py-3">
+            <p className="text-sm font-semibold text-blue-900">
+              {selectedItems.size} {selectedItems.size === 1 ? 'item' : 'items'} selected
+            </p>
+            <p className="mt-1 text-xs leading-5 text-blue-700">
+              Your final share is calculated after everyone finishes selecting.
+            </p>
           </div>
         )}
 
@@ -675,7 +607,7 @@ function SoloSplitContent() {
               disabled={isSaving}
               className="w-full py-3 px-4 bg-green-500 text-white rounded-xl transition-all font-medium hover:bg-green-600"
             >
-              Everyone's Done - View Summary
+              Everyone’s Done - View Summary
             </button>
           </>
         )}

@@ -1,9 +1,17 @@
 'use client';
 
 import Link from 'next/link';
-import { useState, useEffect, Suspense, useMemo } from 'react';
+import { useState, useEffect, Suspense, useMemo, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import {
+  ArrowsRightLeftIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
+  EyeIcon,
+  XMarkIcon,
+} from '@heroicons/react/24/outline';
 import { supabase } from '@/lib/supabase';
+import { getReceiptImages } from '@/lib/receiptImageCache';
 
 interface ReceiptItem {
   name: string;
@@ -53,6 +61,14 @@ function ItemsContent() {
   const [itemQuantities, setItemQuantities] = useState<Map<string, number>>(new Map());
   const [fees, setFees] = useState<Fee[]>([]);
   const [tax, setTax] = useState<number>(0);
+  const [receiptImages, setReceiptImages] = useState<string[]>([]);
+  const [isReceiptOpen, setIsReceiptOpen] = useState(false);
+  const [isReceiptTranslucent, setIsReceiptTranslucent] = useState(true);
+  const [activeReceiptImage, setActiveReceiptImage] = useState(0);
+  const touchStart = useRef<{ x: number; y: number } | null>(null);
+  const viewReceiptButtonRef = useRef<HTMLButtonElement>(null);
+  const closeReceiptButtonRef = useRef<HTMLButtonElement>(null);
+  const receiptDialogRef = useRef<HTMLDivElement>(null);
 
   // Modal states
   const [showAddItemModal, setShowAddItemModal] = useState(false);
@@ -117,6 +133,98 @@ function ItemsContent() {
 
     fetchData();
   }, [receiptId, router]);
+
+  useEffect(() => {
+    if (!receiptId) return;
+
+    let isCurrent = true;
+
+    const receiptImageUrls: string[] = [];
+
+    getReceiptImages(receiptId)
+      .then((images) => {
+        receiptImageUrls.push(...images.map((image) => URL.createObjectURL(image)));
+
+        if (isCurrent) {
+          setReceiptImages(receiptImageUrls);
+        } else {
+          receiptImageUrls.forEach((imageUrl) => URL.revokeObjectURL(imageUrl));
+        }
+      })
+      .catch((cacheError) => {
+        console.warn('Could not load receipt images for comparison:', cacheError);
+      });
+
+    return () => {
+      isCurrent = false;
+      receiptImageUrls.forEach((imageUrl) => URL.revokeObjectURL(imageUrl));
+    };
+  }, [receiptId]);
+
+  useEffect(() => {
+    if (!isReceiptOpen) return;
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    closeReceiptButtonRef.current?.focus();
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setIsReceiptOpen(false);
+        requestAnimationFrame(() => viewReceiptButtonRef.current?.focus());
+      }
+
+      if (event.key === 'Tab') {
+        const focusableElements = Array.from(
+          receiptDialogRef.current?.querySelectorAll<HTMLElement>('button:not([disabled]), [href]') ?? [],
+        );
+        const firstElement = focusableElements[0];
+        const lastElement = focusableElements[focusableElements.length - 1];
+
+        if (event.shiftKey && document.activeElement === firstElement) {
+          event.preventDefault();
+          lastElement?.focus();
+        } else if (!event.shiftKey && document.activeElement === lastElement) {
+          event.preventDefault();
+          firstElement?.focus();
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isReceiptOpen]);
+
+  const openReceipt = () => {
+    if (receiptImages.length > 0) setIsReceiptOpen(true);
+  };
+
+  const closeReceipt = () => {
+    setIsReceiptOpen(false);
+    requestAnimationFrame(() => viewReceiptButtonRef.current?.focus());
+  };
+
+  const handleTouchStart = (event: React.TouchEvent) => {
+    const touch = event.changedTouches[0];
+    touchStart.current = { x: touch.clientX, y: touch.clientY };
+  };
+
+  const handleTouchEnd = (event: React.TouchEvent) => {
+    if (!touchStart.current) return;
+
+    const touch = event.changedTouches[0];
+    const deltaX = touch.clientX - touchStart.current.x;
+    const deltaY = touch.clientY - touchStart.current.y;
+    touchStart.current = null;
+
+    if (Math.abs(deltaX) < 70 || Math.abs(deltaX) <= Math.abs(deltaY)) return;
+
+    if (deltaX < 0 && !isReceiptOpen) openReceipt();
+    if (deltaX > 0 && isReceiptOpen) closeReceipt();
+  };
 
   const groupedItems = useMemo(() => {
     const items: GroupedItem[] = [];
@@ -303,19 +411,39 @@ function ItemsContent() {
   }
 
   return (
-    <div className="min-h-screen bg-white flex flex-col items-center p-6">
+    <div
+      className="min-h-screen bg-white flex flex-col items-center p-6 touch-pan-y"
+      onTouchStart={handleTouchStart}
+      onTouchEnd={handleTouchEnd}
+    >
       <div className="w-full max-w-md mx-auto flex flex-col space-y-6">
         {/* Header */}
-        <div className="text-center space-y-2">
-          <h1 className="text-4xl font-bold tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-blue-600 to-purple-600">
-            Receipt Items
-          </h1>
-          {receiptData?.merchant && (
-            <p className="text-lg font-medium text-gray-900">{receiptData.merchant}</p>
-          )}
-          {receiptData?.date && (
-            <p className="text-sm text-gray-600">{new Date(receiptData.date).toLocaleDateString()}</p>
-          )}
+        <div className="space-y-3">
+          <div className="flex items-start justify-between gap-3">
+            <h1 className="text-3xl font-bold tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-blue-600 to-purple-600 sm:text-4xl">
+              Receipt Items
+            </h1>
+            {receiptImages.length > 0 && (
+              <button
+                ref={viewReceiptButtonRef}
+                type="button"
+                onClick={openReceipt}
+                className="mt-1 shrink-0 inline-flex min-h-10 items-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-3.5 py-2 text-sm font-semibold text-blue-700 transition-colors hover:border-blue-300 hover:bg-blue-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+                aria-haspopup="dialog"
+              >
+                <EyeIcon className="h-4 w-4" aria-hidden="true" />
+                View receipt
+              </button>
+            )}
+          </div>
+          <div className="text-left space-y-1">
+            {receiptData?.merchant && (
+              <p className="text-lg font-medium text-gray-900">{receiptData.merchant}</p>
+            )}
+            {receiptData?.date && (
+              <p className="text-sm text-gray-600">{new Date(receiptData.date).toLocaleDateString()}</p>
+            )}
+          </div>
         </div>
 
         {/* Items List */}
@@ -574,6 +702,96 @@ function ItemsContent() {
           </button>
         </div>
       </div>
+
+      {isReceiptOpen && receiptImages.length > 0 && (
+        <div
+          ref={receiptDialogRef}
+          className="fixed inset-0 z-[70] overflow-hidden bg-white/10 backdrop-blur-[1px]"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Original receipt"
+          onClick={closeReceipt}
+        >
+          <div
+            className="absolute inset-x-0 top-0 z-20 flex min-h-16 items-center justify-between gap-3 border-b border-gray-200 bg-white/95 px-4 py-3 shadow-sm backdrop-blur-md"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="min-w-0">
+              <p className="truncate text-sm font-semibold text-gray-950">Original receipt</p>
+              <p className="text-xs text-gray-500">
+                {isReceiptTranslucent ? 'Compare mode · 70% opacity' : 'Full opacity'}
+              </p>
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setIsReceiptTranslucent((current) => !current)}
+                className="inline-flex min-h-10 items-center gap-2 rounded-full border border-gray-300 bg-white px-3 py-2 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+                aria-pressed={isReceiptTranslucent}
+              >
+                <ArrowsRightLeftIcon className="h-4 w-4" aria-hidden="true" />
+                {isReceiptTranslucent ? 'Make solid' : 'Compare'}
+              </button>
+              <button
+                ref={closeReceiptButtonRef}
+                type="button"
+                onClick={closeReceipt}
+                className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-gray-950 text-white transition-colors hover:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+                aria-label="Close receipt"
+              >
+                <XMarkIcon className="h-5 w-5" aria-hidden="true" />
+              </button>
+            </div>
+          </div>
+
+          <div className="absolute inset-x-0 bottom-12 top-16 overflow-y-auto px-3 py-4 sm:px-8">
+            <div
+              className="mx-auto w-full max-w-lg transition-opacity duration-200"
+              style={{ opacity: isReceiptTranslucent ? 0.7 : 1 }}
+              onClick={(event) => event.stopPropagation()}
+            >
+              {/* The local object URL should render at its natural aspect ratio. */}
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={receiptImages[activeReceiptImage]}
+                alt={`Original receipt${receiptImages.length > 1 ? `, photo ${activeReceiptImage + 1}` : ''}`}
+                className="block h-auto w-full drop-shadow-2xl"
+              />
+            </div>
+          </div>
+
+          {receiptImages.length > 1 && (
+            <div
+              className="absolute inset-x-0 bottom-14 z-20 flex items-center justify-center gap-3"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <button
+                type="button"
+                onClick={() => setActiveReceiptImage((current) => (current - 1 + receiptImages.length) % receiptImages.length)}
+                className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-gray-950/90 text-white hover:bg-gray-950 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+                aria-label="Previous receipt photo"
+              >
+                <ChevronLeftIcon className="h-5 w-5" aria-hidden="true" />
+              </button>
+              <span className="rounded-full bg-gray-950/90 px-3 py-2 text-xs font-semibold text-white">
+                {activeReceiptImage + 1} / {receiptImages.length}
+              </span>
+              <button
+                type="button"
+                onClick={() => setActiveReceiptImage((current) => (current + 1) % receiptImages.length)}
+                className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-gray-950/90 text-white hover:bg-gray-950 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+                aria-label="Next receipt photo"
+              >
+                <ChevronRightIcon className="h-5 w-5" aria-hidden="true" />
+              </button>
+            </div>
+          )}
+
+          <p className="absolute inset-x-0 bottom-4 z-10 text-center text-xs font-medium text-gray-700">
+            Swipe right or tap outside the receipt to close
+          </p>
+        </div>
+      )}
 
       {/* Add Item Modal */}
       {showAddItemModal && (

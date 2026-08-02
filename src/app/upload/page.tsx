@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from 'react';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
+import { saveReceiptImages } from '@/lib/receiptImageCache';
 
 interface Fee {
   name: string;
@@ -379,6 +380,14 @@ export default function Upload() {
 
       if (insertError) {
         throw new Error(`Failed to save receipt: ${insertError.message}`);
+      }
+
+      // Keep the original photos on this device so they can be compared with
+      // the parsed items without uploading sensitive receipt images publicly.
+      try {
+        await saveReceiptImages(receiptId, photos.map((photo) => photo.file));
+      } catch (cacheError) {
+        console.warn('Could not cache receipt images for comparison:', cacheError);
       }
 
       // Navigate to the next page with the receipt ID
