@@ -3,7 +3,15 @@ import { NextResponse } from 'next/server';
 
 export const runtime = 'nodejs';
 
-const MAX_IMAGE_BYTES = 3 * 1024 * 1024;
+const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
+const ALLOWED_IMAGE_TYPES = new Set([
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+  'image/heic',
+  'image/heif',
+]);
+const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com';
 const RECEIPT_PROMPT = `Analyze this receipt image carefully and extract ALL items and charges. Return ONLY a valid JSON object with no additional text, markdown, or code blocks.
 
 IMPORTANT RULES:
@@ -45,8 +53,153 @@ Rules for values:
 - Date format: YYYY-MM-DD
 - If no fees exist, return an empty fees array: "fees": []`;
 
-interface AnalyzeReceiptBody {
-  imageData?: unknown;
+interface CreateUploadBody {
+  action: 'create-upload';
+  fileName?: unknown;
+  mimeType?: unknown;
+  size?: unknown;
+}
+
+interface AnalyzeBody {
+  action: 'analyze';
+  fileName?: unknown;
+}
+
+interface GeminiFile {
+  name?: string;
+  uri?: string;
+  mimeType?: string;
+  sizeBytes?: string;
+  state?: string;
+}
+
+async function createUpload(body: CreateUploadBody, apiKey: string) {
+  if (
+    typeof body.fileName !== 'string' ||
+    typeof body.mimeType !== 'string' ||
+    typeof body.size !== 'number' ||
+    !Number.isInteger(body.size) ||
+    body.size <= 0
+  ) {
+    return NextResponse.json({ error: 'Invalid receipt image.' }, { status: 400 });
+  }
+
+  if (!ALLOWED_IMAGE_TYPES.has(body.mimeType)) {
+    return NextResponse.json({ error: 'Unsupported receipt image format.' }, { status: 400 });
+  }
+
+  if (body.size > MAX_IMAGE_BYTES) {
+    return NextResponse.json(
+      { error: 'Each receipt photo must be smaller than 20 MB.' },
+      { status: 413 },
+    );
+  }
+
+  try {
+    const response = await fetch(`${GEMINI_API_BASE}/upload/v1beta/files`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Goog-Api-Key': apiKey,
+        'X-Goog-Upload-Protocol': 'resumable',
+        'X-Goog-Upload-Command': 'start',
+        'X-Goog-Upload-Header-Content-Length': String(body.size),
+        'X-Goog-Upload-Header-Content-Type': body.mimeType,
+      },
+      body: JSON.stringify({
+        file: { display_name: body.fileName.slice(0, 255) },
+      }),
+    });
+
+    const uploadUrl = response.headers.get('x-goog-upload-url');
+
+    if (!response.ok || !uploadUrl) {
+      console.error('Gemini upload initialization failed:', response.status);
+      return NextResponse.json(
+        { error: 'Failed to prepare receipt upload. Please try again.' },
+        { status: 502 },
+      );
+    }
+
+    return NextResponse.json({ uploadUrl });
+  } catch (error) {
+    console.error('Gemini upload initialization failed:', error);
+    return NextResponse.json(
+      { error: 'Failed to prepare receipt upload. Please try again.' },
+      { status: 502 },
+    );
+  }
+}
+
+async function analyzeFile(body: AnalyzeBody, apiKey: string) {
+  if (
+    typeof body.fileName !== 'string' ||
+    !/^files\/[A-Za-z0-9_-]+$/.test(body.fileName)
+  ) {
+    return NextResponse.json({ error: 'Invalid uploaded receipt.' }, { status: 400 });
+  }
+
+  try {
+    const metadataResponse = await fetch(
+      `${GEMINI_API_BASE}/v1beta/${body.fileName}`,
+      { headers: { 'X-Goog-Api-Key': apiKey } },
+    );
+
+    if (!metadataResponse.ok) {
+      throw new Error(`Gemini file lookup failed with status ${metadataResponse.status}`);
+    }
+
+    const file = (await metadataResponse.json()) as GeminiFile;
+    const fileSize = Number(file.sizeBytes);
+
+    if (
+      !file.uri ||
+      !file.mimeType ||
+      !ALLOWED_IMAGE_TYPES.has(file.mimeType) ||
+      !Number.isFinite(fileSize) ||
+      fileSize <= 0 ||
+      fileSize > MAX_IMAGE_BYTES ||
+      (file.state && file.state !== 'ACTIVE')
+    ) {
+      return NextResponse.json({ error: 'Uploaded receipt is not valid.' }, { status: 400 });
+    }
+
+    const genAI = new GoogleGenerativeAI(apiKey);
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+    const result = await model.generateContent([
+      RECEIPT_PROMPT,
+      {
+        fileData: {
+          fileUri: file.uri,
+          mimeType: file.mimeType,
+        },
+      },
+    ]);
+
+    return NextResponse.json({ analysis: result.response.text() });
+  } catch (error) {
+    console.error('Gemini receipt analysis failed:', error);
+    return NextResponse.json(
+      { error: 'Failed to analyze receipt. Please try again.' },
+      { status: 502 },
+    );
+  } finally {
+    try {
+      const deleteResponse = await fetch(
+        `${GEMINI_API_BASE}/v1beta/${body.fileName}`,
+        {
+          method: 'DELETE',
+          headers: { 'X-Goog-Api-Key': apiKey },
+        },
+      );
+
+      if (!deleteResponse.ok && deleteResponse.status !== 404) {
+        console.error('Gemini file cleanup failed:', deleteResponse.status);
+      }
+    } catch (error) {
+      console.error('Gemini file cleanup failed:', error);
+    }
+  }
 }
 
 export async function POST(request: Request) {
@@ -60,55 +213,21 @@ export async function POST(request: Request) {
     );
   }
 
-  let body: AnalyzeReceiptBody;
+  let body: CreateUploadBody | AnalyzeBody;
 
   try {
-    body = (await request.json()) as AnalyzeReceiptBody;
+    body = (await request.json()) as CreateUploadBody | AnalyzeBody;
   } catch {
     return NextResponse.json({ error: 'Invalid request body.' }, { status: 400 });
   }
 
-  if (typeof body.imageData !== 'string') {
-    return NextResponse.json({ error: 'A receipt image is required.' }, { status: 400 });
+  if (body.action === 'create-upload') {
+    return createUpload(body, apiKey);
   }
 
-  const imageMatch = body.imageData.match(
-    /^data:(image\/(?:jpeg|png|webp|heic|heif));base64,([A-Za-z0-9+/=\r\n]+)$/,
-  );
-
-  if (!imageMatch) {
-    return NextResponse.json({ error: 'Unsupported receipt image format.' }, { status: 400 });
+  if (body.action === 'analyze') {
+    return analyzeFile(body, apiKey);
   }
 
-  const [, mimeType, base64Image] = imageMatch;
-  const imageBytes = Buffer.from(base64Image, 'base64').byteLength;
-
-  if (imageBytes > MAX_IMAGE_BYTES) {
-    return NextResponse.json(
-      { error: 'Receipt image must be smaller than 3 MB.' },
-      { status: 413 },
-    );
-  }
-
-  try {
-    const genAI = new GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
-    const result = await model.generateContent([
-      RECEIPT_PROMPT,
-      {
-        inlineData: {
-          data: base64Image,
-          mimeType,
-        },
-      },
-    ]);
-
-    return NextResponse.json({ analysis: result.response.text() });
-  } catch (error) {
-    console.error('Gemini receipt analysis failed:', error);
-    return NextResponse.json(
-      { error: 'Failed to analyze receipt. Please try again.' },
-      { status: 502 },
-    );
-  }
+  return NextResponse.json({ error: 'Invalid request action.' }, { status: 400 });
 }

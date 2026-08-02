@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
@@ -34,25 +34,56 @@ interface RawFee {
   amount: string | number | undefined;
 }
 
-const MAX_RECEIPT_IMAGE_BYTES = 3 * 1024 * 1024;
+interface ReceiptPhoto {
+  file: File;
+  previewUrl: string;
+}
+
+const MAX_RECEIPT_IMAGE_BYTES = 20 * 1024 * 1024;
+const ALLOWED_RECEIPT_IMAGE_TYPES = new Set([
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+  'image/heic',
+  'image/heif',
+]);
 
 export default function Upload() {
-  const [previews, setPreviews] = useState<string[]>([]);
+  const [photos, setPhotos] = useState<ReceiptPhoto[]>([]);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const previewUrlsRef = useRef(new Set<string>());
   const router = useRouter();
+
+  useEffect(() => {
+    const previewUrls = previewUrlsRef.current;
+    return () => {
+      previewUrls.forEach(url => URL.revokeObjectURL(url));
+    };
+  }, []);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (files && files.length > 0) {
-      Array.from(files).forEach(file => {
-        const reader = new FileReader();
-        reader.onloadend = () => {
-          setPreviews(prev => [...prev, reader.result as string]);
-        };
-        reader.readAsDataURL(file);
-      });
+      const selectedFiles = Array.from(files);
+      const invalidFormat = selectedFiles.find(file => !ALLOWED_RECEIPT_IMAGE_TYPES.has(file.type));
+      const oversizedFile = selectedFiles.find(file => file.size > MAX_RECEIPT_IMAGE_BYTES);
+
+      if (invalidFormat) {
+        setError('Please choose a JPEG, PNG, WebP, HEIC, or HEIF image.');
+      } else if (oversizedFile) {
+        setError('Each receipt photo must be smaller than 20 MB.');
+      } else {
+        const newPhotos = selectedFiles.map(file => {
+          const previewUrl = URL.createObjectURL(file);
+          previewUrlsRef.current.add(previewUrl);
+          return { file, previewUrl };
+        });
+
+        setPhotos(currentPhotos => [...currentPhotos, ...newPhotos]);
+        setError(null);
+      }
     }
     // Reset input so the same file can be selected again
     if (fileInputRef.current) {
@@ -68,7 +99,12 @@ export default function Upload() {
   };
 
   const removePhoto = (index: number) => {
-    setPreviews(prev => prev.filter((_, i) => i !== index));
+    const photo = photos[index];
+    if (photo) {
+      URL.revokeObjectURL(photo.previewUrl);
+      previewUrlsRef.current.delete(photo.previewUrl);
+    }
+    setPhotos(currentPhotos => currentPhotos.filter((_, i) => i !== index));
     setError(null);
   };
 
@@ -216,36 +252,72 @@ export default function Upload() {
     }
   };
 
-  const analyzeImage = async (imageData: string): Promise<ItemizedList> => {
-    const base64Image = imageData.split(',')[1] || '';
-    const imageBytes = Math.floor((base64Image.length * 3) / 4);
-
-    if (imageBytes > MAX_RECEIPT_IMAGE_BYTES) {
-      throw new Error('Each receipt photo must be smaller than 3 MB.');
-    }
-
-    const response = await fetch('/api/analyze-receipt', {
+  const analyzeImage = async (file: File): Promise<ItemizedList> => {
+    const createUploadResponse = await fetch('/api/analyze-receipt', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ imageData }),
+      body: JSON.stringify({
+        action: 'create-upload',
+        fileName: file.name,
+        mimeType: file.type,
+        size: file.size,
+      }),
     });
 
-    const payload = (await response.json().catch(() => ({}))) as {
+    const createUploadPayload = (await createUploadResponse.json().catch(() => ({}))) as {
+      uploadUrl?: string;
+      error?: string;
+    };
+
+    if (!createUploadResponse.ok || !createUploadPayload.uploadUrl) {
+      throw new Error(createUploadPayload.error || 'Failed to prepare receipt upload.');
+    }
+
+    const uploadResponse = await fetch(createUploadPayload.uploadUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': file.type,
+        'X-Goog-Upload-Offset': '0',
+        'X-Goog-Upload-Command': 'upload, finalize',
+      },
+      body: file,
+    });
+
+    const uploadPayload = (await uploadResponse.json().catch(() => ({}))) as {
+      file?: { name?: string };
+    };
+
+    if (!uploadResponse.ok || !uploadPayload.file?.name) {
+      throw new Error('Failed to upload receipt. Please try again.');
+    }
+
+    const analysisResponse = await fetch('/api/analyze-receipt', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        action: 'analyze',
+        fileName: uploadPayload.file.name,
+      }),
+    });
+
+    const analysisPayload = (await analysisResponse.json().catch(() => ({}))) as {
       analysis?: string;
       error?: string;
     };
 
-    if (!response.ok) {
-      throw new Error(payload.error || 'Failed to analyze receipt.');
+    if (!analysisResponse.ok) {
+      throw new Error(analysisPayload.error || 'Failed to analyze receipt.');
     }
 
-    return parseAnalysis(payload.analysis || null);
+    return parseAnalysis(analysisPayload.analysis || null);
   };
 
   const handleContinue = async () => {
-    if (previews.length === 0) return;
+    if (photos.length === 0) return;
 
     try {
       setIsAnalyzing(true);
@@ -254,8 +326,8 @@ export default function Upload() {
       // Analyze all images and combine results
       const allResults: ItemizedList[] = [];
 
-      for (const preview of previews) {
-        const result = await analyzeImage(preview);
+      for (const photo of photos) {
+        const result = await analyzeImage(photo.file);
         allResults.push(result);
       }
 
@@ -296,7 +368,7 @@ export default function Upload() {
         .insert([
           {
             id: receiptId,
-            raw_analysis: JSON.stringify({ imageCount: previews.length, results: allResults }),
+            raw_analysis: JSON.stringify({ imageCount: photos.length, results: allResults }),
             itemized_list: combinedResult,
             merchant: combinedResult.merchant,
             date: combinedResult.date,
@@ -330,14 +402,15 @@ export default function Upload() {
         {/* Upload Area */}
         <div className="w-full space-y-4">
           {/* Photo Grid */}
-          {previews.length > 0 && (
+          {photos.length > 0 && (
             <div className="grid grid-cols-2 gap-3">
-              {previews.map((preview, index) => (
-                <div key={index} className="relative aspect-[3/4] rounded-2xl overflow-hidden bg-gray-50">
+              {photos.map((photo, index) => (
+                <div key={photo.previewUrl} className="relative aspect-[3/4] rounded-2xl overflow-hidden bg-gray-50">
                   <Image
-                    src={preview}
+                    src={photo.previewUrl}
                     alt={`Receipt ${index + 1}`}
                     fill
+                    unoptimized
                     className="object-cover"
                   />
                   <button
@@ -359,21 +432,21 @@ export default function Upload() {
           {/* Add Photo Button */}
           <button
             onClick={handleAddPhoto}
-            className={`w-full py-4 px-6 ${previews.length > 0 ? 'bg-gray-100 hover:bg-gray-200 text-gray-700' : 'bg-blue-500 hover:bg-blue-600 text-white shadow-lg shadow-blue-500/25 hover:shadow-blue-500/40'} rounded-2xl flex items-center justify-center space-x-3 transition-all text-xl font-medium`}
+            className={`w-full py-4 px-6 ${photos.length > 0 ? 'bg-gray-100 hover:bg-gray-200 text-gray-700' : 'bg-blue-500 hover:bg-blue-600 text-white shadow-lg shadow-blue-500/25 hover:shadow-blue-500/40'} rounded-2xl flex items-center justify-center space-x-3 transition-all text-xl font-medium`}
           >
             <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              {previews.length > 0 ? (
+              {photos.length > 0 ? (
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
               ) : (
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
               )}
             </svg>
-            <span>{previews.length > 0 ? 'Add Another Photo' : 'Add Photo'}</span>
+            <span>{photos.length > 0 ? 'Add Another Photo' : 'Add Photo'}</span>
           </button>
 
-          {previews.length > 0 && (
+          {photos.length > 0 && (
             <p className="text-center text-sm text-gray-500">
-              {previews.length} photo{previews.length > 1 ? 's' : ''} added
+              {photos.length} photo{photos.length > 1 ? 's' : ''} added
             </p>
           )}
 
@@ -403,9 +476,9 @@ export default function Upload() {
           </Link>
           <button
             onClick={handleContinue}
-            disabled={previews.length === 0 || isAnalyzing}
+            disabled={photos.length === 0 || isAnalyzing}
             className={`w-1/2 py-4 px-6 bg-blue-500 text-white rounded-2xl transition-all duration-300 font-medium text-lg text-center hover:bg-blue-600 relative
-              ${(previews.length === 0 || isAnalyzing) && 'opacity-50 cursor-not-allowed'}`}
+              ${(photos.length === 0 || isAnalyzing) && 'opacity-50 cursor-not-allowed'}`}
           >
             {isAnalyzing ? (
               <div className="flex items-center justify-center">
